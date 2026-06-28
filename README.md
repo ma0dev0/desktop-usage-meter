@@ -2,7 +2,7 @@
 
 Claude と Codex の使用量を読み取り、**タスクトレイ常駐・常時最前面・透明HUD風**のメーター窓に表示する Electron デスクトップアプリです。Chrome拡張ではできなかった「ブラウザ非依存・常に最前面・ウィンドウ透過」を実現します。
 
-Chrome拡張版（Claude Usage Meter / Codex Usage Meter）の解析ロジック（`usageParser`）をそのまま流用しています。
+<img width="320" height="185" alt="image" src="https://github.com/user-attachments/assets/05b85b2d-7318-4454-9969-d1c5478a4ae9" />
 
 ## 仕組み
 
