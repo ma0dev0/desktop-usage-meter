@@ -1,0 +1,49 @@
+{
+  "name": "desktop-usage-meter",
+  "version": "1.0.0",
+  "description": "Claude / Codex の使用量を読み取り、トレイ常駐・常時最前面・透過のメーター窓に表示する Electron デスクトップアプリ。",
+  "main": "main.js",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ma0dev0/desktop-usage-meter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ma0dev0/desktop-usage-meter/issues"
+  },
+  "homepage": "https://github.com/ma0dev0/desktop-usage-meter#readme",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/claudeParser.test.js && node tests/codexParser.test.js && node tests/usagePace.test.js && node tests/providerVisibility.test.js",
+    "check": "node --check main.js && node --check preload.js && node --check src/claudeParser.js && node --check src/codexParser.js && node --check src/providers.js && node --check src/providerVisibility.js && node --check renderer/usagePace.js && node --check renderer/meter.js",
+    "icons": "node scripts/generate-icons.mjs",
+    "dist": "electron-builder",
+    "dist:mac": "npm run icons && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64",
+    "dist:mac:signed": "npm run icons && electron-builder --mac dmg --arm64",
+    "dist:win": "npm run icons && electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.example.usagemeter",
+    "productName": "Usage Meter",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**",
+      "renderer/**",
+      "icons/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icons/icon256.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "icons/icon1024.png",
+      "category": "public.app-category.utilities"
+    }
+  },
+  "devDependencies": {
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3"
+  }
+}

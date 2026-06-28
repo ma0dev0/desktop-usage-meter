@@ -1,0 +1,416 @@
+// Electron メインプロセス。
+// - 隠しウィンドウで Claude/Codex の使用量ページを読み、innerText を解析する
+// - トレイ常駐＋常時最前面・透過のメーター窓に表示する
+// - ログインはアプリ内（persist パーティション）で1回だけ
+
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { providers, isLoginUrl } = require('./src/providers');
+const { shouldDisplayProvider } = require('./src/providerVisibility');
+
+const PARTITION = 'persist:usage';
+const EXTRACT_JS =
+  "(() => ({ url: location.href, title: document.title, bodyText: (document.body && document.body.innerText) || '' }))()";
+
+const DEFAULT_PREFS = {
+  theme: 'auto',
+  opacity: 0.96,
+  alwaysOnTop: true,
+  intervalMin: 5,
+  weeklyPaceMode: 'calendar',
+  providers: { claude: true, codex: true },
+  autoLaunch: false,
+  meterBounds: null,
+  meterVisible: true
+};
+
+let prefs = Object.assign({}, DEFAULT_PREFS);
+let results = { claude: null, codex: null };
+
+let tray = null;
+let meterWin = null;
+const scrapeWins = {};
+let refreshTimer = null;
+let refreshing = false;
+
+function stateFile() {
+  return path.join(app.getPath('userData'), 'state.json');
+}
+
+function loadState() {
+  try {
+    const data = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
+    if (data.prefs) prefs = Object.assign({}, DEFAULT_PREFS, data.prefs);
+    if (data.prefs && data.prefs.providers) prefs.providers = Object.assign({ claude: true, codex: true }, data.prefs.providers);
+    if (data.results) results = Object.assign({ claude: null, codex: null }, data.results);
+  } catch (e) {
+    /* 初回起動 */
+  }
+}
+
+function saveState() {
+  try {
+    fs.writeFileSync(stateFile(), JSON.stringify({ prefs, results }, null, 2));
+  } catch (e) {
+    /* 失敗は無視 */
+  }
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function iconPath(size) {
+  return path.join(__dirname, 'icons', 'icon' + size + '.png');
+}
+
+// --- スクレイピング ---
+
+function getScrapeWin(id) {
+  if (scrapeWins[id] && !scrapeWins[id].isDestroyed()) return scrapeWins[id];
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: { partition: PARTITION, backgroundThrottling: false, sandbox: true }
+  });
+  scrapeWins[id] = win;
+  return win;
+}
+
+async function scrapeOne(provider) {
+  const win = getScrapeWin(provider.id);
+  try {
+    await win.loadURL(provider.usageUrl);
+  } catch (e) {
+    return { error: 'LOAD_FAILED' };
+  }
+
+  for (let i = 0; i < 8; i++) {
+    await delay(1500);
+    let data = null;
+    try {
+      data = await win.webContents.executeJavaScript(EXTRACT_JS, true);
+    } catch (e) {
+      continue;
+    }
+    const curUrl = win.webContents.getURL();
+    if (isLoginUrl(curUrl)) return { loggedIn: false, url: curUrl, capturedAt: Date.now() };
+
+    const parsed = provider.parse((data && data.bodyText) || '');
+    if (parsed.relatedFound) {
+      return Object.assign({}, parsed, {
+        loggedIn: true,
+        url: (data && data.url) || curUrl,
+        capturedAt: Date.now()
+      });
+    }
+  }
+
+  const finalUrl = win.webContents.getURL();
+  return { loggedIn: !isLoginUrl(finalUrl), empty: true, url: finalUrl, capturedAt: Date.now() };
+}
+
+async function refreshAll(reason) {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    const ids = Object.keys(providers).filter(id => prefs.providers[id]);
+    for (const id of ids) {
+      const res = await scrapeOne(providers[id]);
+      if (res && !res.error) results[id] = res;
+    }
+    saveState();
+    pushUpdate();
+    updateTray();
+  } finally {
+    refreshing = false;
+  }
+}
+
+// --- 表示・トレイ ---
+
+function pctText(res) {
+  if (!res) return '—';
+  if (res.loggedIn === false) return '未ログイン';
+  if (res.determined && res.percentRemaining != null) return '残り' + res.percentRemaining + '%';
+  if (res.relatedFound) return '?';
+  return '—';
+}
+
+function providerMeta() {
+  return Object.keys(providers).map(id => ({
+    id,
+    name: providers[id].name,
+    color: providers[id].color,
+    enabled: Boolean(prefs.providers[id])
+  }));
+}
+
+function pushUpdate() {
+  if (meterWin && !meterWin.isDestroyed()) {
+    meterWin.webContents.send('update', { results, prefs, providers: providerMeta() });
+  }
+}
+
+function updateTray() {
+  if (!tray) return;
+  const parts = Object.keys(providers)
+    .filter(id => shouldDisplayProvider(
+      { id, enabled: Boolean(prefs.providers[id]) },
+      results[id]
+    ))
+    .map(id => providers[id].name + ' ' + pctText(results[id]));
+  tray.setToolTip('Usage Meter\n' + parts.join('\n'));
+  tray.setContextMenu(buildTrayMenu());
+}
+
+function buildTrayMenu() {
+  const opacities = [1, 0.9, 0.8, 0.65, 0.5];
+  const intervals = [1, 5, 15, 30, 60];
+  return Menu.buildFromTemplate([
+    {
+      label: meterWin && meterWin.isVisible() ? 'メーターを隠す' : 'メーターを表示',
+      click: toggleMeter
+    },
+    { label: '再取得', click: () => refreshAll('manual') },
+    { type: 'separator' },
+    {
+      label: '透明度',
+      submenu: opacities.map(o => ({
+        label: Math.round(o * 100) + '%',
+        type: 'radio',
+        checked: Math.abs((prefs.opacity || 1) - o) < 0.001,
+        click: () => { prefs.opacity = o; applyMeterPrefs(); saveState(); }
+      }))
+    },
+    {
+      label: '常に最前面',
+      type: 'checkbox',
+      checked: Boolean(prefs.alwaysOnTop),
+      click: m => { prefs.alwaysOnTop = m.checked; applyMeterPrefs(); saveState(); }
+    },
+    {
+      label: 'テーマ',
+      submenu: [
+        themeItem('自動', 'auto'),
+        themeItem('ライト', 'light'),
+        themeItem('ダーク', 'dark')
+      ]
+    },
+    {
+      label: '自動更新間隔',
+      submenu: intervals.map(min => ({
+        label: min + '分',
+        type: 'radio',
+        checked: prefs.intervalMin === min,
+        click: () => { prefs.intervalMin = min; startTimer(); saveState(); }
+      }))
+    },
+    {
+      label: '週間ペースの計算',
+      submenu: [
+        weeklyPaceItem('7日間（土日を含む）', 'calendar'),
+        weeklyPaceItem('平日5日', 'weekdays')
+      ]
+    },
+    { type: 'separator' },
+    {
+      label: '対象サービス',
+      submenu: Object.keys(providers).map(id => ({
+        label: providers[id].name,
+        type: 'checkbox',
+        checked: Boolean(prefs.providers[id]),
+        click: m => { prefs.providers[id] = m.checked; saveState(); refreshAll('toggle'); }
+      }))
+    },
+    { label: 'Claude にログイン', click: () => openLogin('claude') },
+    { label: 'Codex にログイン', click: () => openLogin('codex') },
+    { type: 'separator' },
+    {
+      label: '起動時に自動起動',
+      type: 'checkbox',
+      checked: Boolean(prefs.autoLaunch),
+      click: m => { prefs.autoLaunch = m.checked; applyAutoLaunch(); saveState(); }
+    },
+    { label: '終了', click: () => { app.isQuitting = true; app.quit(); } }
+  ]);
+}
+
+function themeItem(label, value) {
+  return {
+    label,
+    type: 'radio',
+    checked: (prefs.theme || 'auto') === value,
+    click: () => { prefs.theme = value; pushUpdate(); saveState(); }
+  };
+}
+
+function weeklyPaceItem(label, value) {
+  return {
+    label,
+    type: 'radio',
+    checked: (prefs.weeklyPaceMode || 'calendar') === value,
+    click: () => {
+      prefs.weeklyPaceMode = value;
+      pushUpdate();
+      saveState();
+    }
+  };
+}
+
+// --- メーター窓 ---
+
+function defaultMeterBounds() {
+  const wa = screen.getPrimaryDisplay().workArea;
+  const width = 320;
+  const height = 180;
+  return { width, height, x: wa.x + wa.width - width - 16, y: wa.y + 16 };
+}
+
+function createMeter() {
+  if (meterWin && !meterWin.isDestroyed()) {
+    meterWin.show();
+    return;
+  }
+  const b = prefs.meterBounds || defaultMeterBounds();
+  meterWin = new BrowserWindow({
+    width: b.width,
+    height: b.height,
+    x: b.x,
+    y: b.y,
+    minWidth: 280,
+    minHeight: 100,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: true,
+    skipTaskbar: true,
+    show: false,
+    alwaysOnTop: prefs.alwaysOnTop,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true }
+  });
+
+  meterWin.loadFile(path.join(__dirname, 'renderer', 'meter.html'));
+  meterWin.webContents.on('did-finish-load', () => pushUpdate());
+  applyMeterPrefs();
+
+  meterWin.once('ready-to-show', () => {
+    if (prefs.meterVisible !== false) meterWin.show();
+  });
+
+  meterWin.on('close', e => {
+    try { prefs.meterBounds = meterWin.getBounds(); } catch (err) {}
+    if (!app.isQuitting) {
+      e.preventDefault();
+      meterWin.hide();
+      prefs.meterVisible = false;
+      saveState();
+      updateTray();
+    }
+  });
+}
+
+function toggleMeter() {
+  if (!meterWin || meterWin.isDestroyed()) {
+    prefs.meterVisible = true;
+    createMeter();
+  } else if (meterWin.isVisible()) {
+    meterWin.hide();
+    prefs.meterVisible = false;
+  } else {
+    meterWin.show();
+    prefs.meterVisible = true;
+  }
+  saveState();
+  updateTray();
+}
+
+function applyMeterPrefs() {
+  if (!meterWin || meterWin.isDestroyed()) return;
+  meterWin.setOpacity(typeof prefs.opacity === 'number' ? prefs.opacity : 1);
+  meterWin.setAlwaysOnTop(Boolean(prefs.alwaysOnTop), 'screen-saver');
+  pushUpdate();
+}
+
+// --- ログイン ---
+
+function openLogin(id) {
+  const provider = providers[id];
+  if (!provider) return;
+  const win = new BrowserWindow({
+    width: 1000,
+    height: 820,
+    title: provider.name + ' にログイン',
+    webPreferences: { partition: PARTITION, sandbox: true }
+  });
+  win.loadURL(provider.usageUrl);
+  win.on('closed', () => { refreshAll('login-closed'); });
+}
+
+// --- その他 ---
+
+function startTimer() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  const min = prefs.intervalMin > 0 ? prefs.intervalMin : 5;
+  refreshTimer = setInterval(() => refreshAll('timer'), min * 60 * 1000);
+}
+
+function applyAutoLaunch() {
+  try {
+    app.setLoginItemSettings({ openAtLogin: Boolean(prefs.autoLaunch) });
+  } catch (e) {
+    /* 一部環境では未対応 */
+  }
+}
+
+function createTray() {
+  let img = nativeImage.createFromPath(iconPath(32));
+  if (img.isEmpty()) img = nativeImage.createFromPath(iconPath(16));
+  tray = new Tray(img);
+  tray.setToolTip('Usage Meter');
+  tray.on('click', toggleMeter);
+  updateTray();
+}
+
+// --- IPC ---
+
+ipcMain.handle('getState', () => ({ results, prefs, providers: providerMeta() }));
+ipcMain.handle('refresh', () => refreshAll('renderer'));
+ipcMain.on('openLogin', (e, id) => openLogin(id));
+ipcMain.on('hideMeter', () => { if (meterWin) { meterWin.hide(); prefs.meterVisible = false; saveState(); updateTray(); } });
+ipcMain.on('resizeMeter', (e, height) => {
+  if (!meterWin || meterWin.isDestroyed() || e.sender !== meterWin.webContents) return;
+  const bounds = meterWin.getBounds();
+  const nextHeight = Math.max(100, Math.min(440, Math.ceil(Number(height) || 0)));
+  if (Math.abs(bounds.height - nextHeight) > 1) {
+    meterWin.setBounds(Object.assign({}, bounds, { height: nextHeight }), false);
+  }
+});
+ipcMain.on('setTheme', (e, theme) => { prefs.theme = theme; saveState(); pushUpdate(); updateTray(); });
+ipcMain.on('setWeeklyPaceMode', (e, mode) => {
+  prefs.weeklyPaceMode = mode === 'weekdays' ? 'weekdays' : 'calendar';
+  saveState();
+  pushUpdate();
+});
+
+// --- アプリ起動 ---
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => toggleMeter());
+
+  app.whenReady().then(() => {
+    loadState();
+    applyAutoLaunch();
+    createTray();
+    createMeter();
+    startTimer();
+    refreshAll('startup');
+  });
+
+  // トレイ常駐アプリなので、全ウィンドウを閉じても終了しない。
+  app.on('window-all-closed', e => {});
+}

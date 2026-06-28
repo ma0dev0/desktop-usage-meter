@@ -1,0 +1,17 @@
+.DS_Store
+.agents/
+
+node_modules/
+dist/
+
+.env
+.env.*
+!.env.example
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+coverage/
+.nyc_output/

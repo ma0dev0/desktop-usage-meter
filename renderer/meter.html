@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="meter.css">
+  <title>Usage Meter</title>
+</head>
+<body>
+  <div id="app" class="app">
+    <div class="hud-controls">
+      <span class="drag-grip" title="ドラッグして移動" aria-hidden="true"></span>
+      <button id="refreshBtn" class="iconbtn" type="button" title="更新" aria-label="更新">↻</button>
+      <button id="closeBtn" class="iconbtn" type="button" title="隠す" aria-label="隠す">×</button>
+    </div>
+    <main id="providers" class="providers"></main>
+  </div>
+
+  <script src="../src/providerVisibility.js"></script>
+  <script src="usagePace.js"></script>
+  <script src="meter.js"></script>
+</body>
+</html>
