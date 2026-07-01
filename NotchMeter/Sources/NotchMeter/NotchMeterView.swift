@@ -141,6 +141,9 @@ final class NotchMeterView: NSView {
         let sideSlotWidth = (bounds.width - notchGapWidth) / 2
         let maxSideWidth = max(148, sideSlotWidth - outerPadding - notchSidePadding)
 
+        let notchLeftX = bounds.midX - notchGapWidth / 2
+        let notchRightX = bounds.midX + notchGapWidth / 2
+
         guard providers.count > 1 else {
             let providerId = providers.first?.id.lowercased()
             guard let provider = providers.first else {
@@ -148,16 +151,16 @@ final class NotchMeterView: NSView {
             }
             let width = providerContentWidth(for: provider, maxWidth: maxSideWidth)
             let rect = providerId == "codex"
-                ? CGRect(x: bounds.width - outerPadding - width, y: 0, width: width, height: bounds.height)
-                : CGRect(x: outerPadding, y: 0, width: width, height: bounds.height)
+                ? CGRect(x: notchRightX + notchSidePadding, y: 0, width: width, height: bounds.height)
+                : CGRect(x: notchLeftX - notchSidePadding - width, y: 0, width: width, height: bounds.height)
             return [rect]
         }
 
         let leftWidth = providerContentWidth(for: providers[0], maxWidth: maxSideWidth)
         let rightWidth = providerContentWidth(for: providers[1], maxWidth: maxSideWidth)
         return [
-            CGRect(x: outerPadding, y: 0, width: leftWidth, height: bounds.height),
-            CGRect(x: bounds.width - outerPadding - rightWidth, y: 0, width: rightWidth, height: bounds.height)
+            CGRect(x: notchLeftX - notchSidePadding - leftWidth, y: 0, width: leftWidth, height: bounds.height),
+            CGRect(x: notchRightX + notchSidePadding, y: 0, width: rightWidth, height: bounds.height)
         ]
     }
 
