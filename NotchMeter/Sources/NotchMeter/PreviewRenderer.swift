@@ -83,9 +83,9 @@ enum PreviewRenderer {
         }
         switch target {
         case .left:
-            return CGPoint(x: 28, y: size.height / 2)
+            return CGPoint(x: size.width / 2 - previewNotchGapWidth / 2 - 40, y: size.height / 2)
         case .right:
-            return CGPoint(x: size.width - 28, y: size.height / 2)
+            return CGPoint(x: size.width / 2 + previewNotchGapWidth / 2 + 40, y: size.height / 2)
         case .placeholder:
             return CGPoint(x: 28, y: size.height / 2)
         }
