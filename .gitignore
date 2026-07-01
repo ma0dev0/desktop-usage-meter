@@ -15,3 +15,6 @@ pnpm-debug.log*
 
 coverage/
 .nyc_output/
+
+NotchMeter/.build/
+NotchMeter/.swiftpm/

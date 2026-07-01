@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Claude / Codex の使用量を読み取り、トレイ常駐・常時最前面・透過のメーター窓に表示する Electron デスクトップアプリ。",
   "main": "main.js",
+  "author": "ma0dev0",
   "private": true,
   "repository": {
     "type": "git",
@@ -14,12 +15,33 @@
   "homepage": "https://github.com/ma0dev0/desktop-usage-meter#readme",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/claudeParser.test.js && node tests/codexParser.test.js && node tests/usagePace.test.js && node tests/providerVisibility.test.js",
-    "check": "node --check main.js && node --check preload.js && node --check src/claudeParser.js && node --check src/codexParser.js && node --check src/providers.js && node --check src/providerVisibility.js && node --check renderer/usagePace.js && node --check renderer/meter.js",
+    "test": "node tests/claudeParser.test.js && node tests/codexParser.test.js && node tests/usagePace.test.js && node tests/providerVisibility.test.js && node tests/statusSummary.test.js && node tests/notchStatus.test.js && node tests/notchMeterLauncher.test.js && node tests/freshness.test.js && node tests/refreshStatus.test.js && node tests/meterRenderer.test.js && node tests/atomicFile.test.js",
+    "check": "node --check main.js && node --check preload.js && node --check src/atomicFile.js && node --check src/claudeParser.js && node --check src/codexParser.js && node --check src/providers.js && node --check src/providerVisibility.js && node --check src/statusSummary.js && node --check src/notchStatus.js && node --check src/notchMeterLauncher.js && node --check src/freshness.js && node --check src/refreshStatus.js && node --check renderer/usagePace.js && node --check renderer/meter.js && node --check scripts/check-notch-previews.mjs && node --check scripts/check-notch-accessibility.mjs && node --check tests/notchMeterLauncher.test.js && node --check tests/freshness.test.js && node --check tests/refreshStatus.test.js && node --check tests/meterRenderer.test.js && node --check tests/atomicFile.test.js",
+    "check:notch": "swift build --package-path NotchMeter",
+    "notch": "swift run --package-path NotchMeter NotchMeter",
+    "notch:sample": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status.json\" swift run --package-path NotchMeter NotchMeter",
+    "notch:preview": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-preview.png",
+    "notch:preview:backdrop": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-backdrop.png --preview-backdrop",
+    "notch:preview:hover": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-hover.png --preview-backdrop --preview-hover left",
+    "notch:preview:missing": "swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-missing.png --preview-backdrop --preview-issue missing",
+    "notch:preview:unreadable": "swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-unreadable.png --preview-backdrop --preview-issue unreadable",
+    "notch:preview:critical": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-critical.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-critical.png",
+    "notch:preview:single": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-single.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-single.png",
+    "notch:preview:empty": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-empty.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-empty.png --preview-backdrop",
+    "notch:preview:off": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-off.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-off.png --preview-backdrop",
+    "notch:preview:login-required": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-login-required.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-login-required.png --preview-backdrop",
+    "notch:preview:stale": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-stale.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-stale.png --preview-backdrop",
+    "notch:preview:unavailable": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-unavailable.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-unavailable.png",
+    "notch:preview:refreshing": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-refreshing.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-refreshing.png",
+    "notch:preview:error": "USAGE_METER_STATUS_PATH=\"$PWD/NotchMeter/Samples/notch-status-refresh-error.json\" swift run --package-path NotchMeter NotchMeter --render-preview /tmp/notchmeter-refresh-error.png",
+    "notch:preview:all": "npm run notch:preview && npm run notch:preview:backdrop && npm run notch:preview:hover && npm run notch:preview:critical && npm run notch:preview:single && npm run notch:preview:empty && npm run notch:preview:off && npm run notch:preview:login-required && npm run notch:preview:stale && npm run notch:preview:unavailable && npm run notch:preview:refreshing && npm run notch:preview:error && npm run notch:preview:missing && npm run notch:preview:unreadable",
+    "notch:preview:check": "node scripts/check-notch-previews.mjs",
+    "notch:accessibility:check": "node scripts/check-notch-accessibility.mjs",
+    "notch:build:release": "swift build -c release --arch arm64 --package-path NotchMeter",
     "icons": "node scripts/generate-icons.mjs",
     "dist": "electron-builder",
-    "dist:mac": "npm run icons && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64",
-    "dist:mac:signed": "npm run icons && electron-builder --mac dmg --arm64",
+    "dist:mac": "npm run icons && npm run notch:build:release && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64",
+    "dist:mac:signed": "npm run icons && npm run notch:build:release && electron-builder --mac dmg --arm64",
     "dist:win": "npm run icons && electron-builder --win nsis --x64"
   },
   "build": {
@@ -39,7 +61,13 @@
     "mac": {
       "target": "dmg",
       "icon": "icons/icon1024.png",
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "extraResources": [
+        {
+          "from": "NotchMeter/.build/release/NotchMeter",
+          "to": "NotchMeter/NotchMeter"
+        }
+      ]
     }
   },
   "devDependencies": {

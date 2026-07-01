@@ -11,5 +11,42 @@
     return provider.id !== 'claude' || !result || result.loggedIn !== false;
   }
 
-  return { shouldDisplayProvider };
+  function hiddenProviderReason(provider, result) {
+    if (!provider || !provider.enabled) return '';
+    if (provider.id === 'claude' && result && result.loggedIn === false) {
+      return `${provider.name || 'Claude'}: 未ログイン`;
+    }
+    return '';
+  }
+
+  function emptyStateInfo(providers = [], results = {}) {
+    const enabledProviders = providers.filter(provider => provider && provider.enabled);
+    if (enabledProviders.length === 0) {
+      return {
+        label: '対象サービスがOFFです',
+        detail: 'トレイメニューでClaudeまたはCodexを有効にできます'
+      };
+    }
+
+    const hiddenReasons = enabledProviders
+      .map(provider => hiddenProviderReason(provider, results[provider.id]))
+      .filter(Boolean);
+    if (hiddenReasons.length === enabledProviders.length && hiddenReasons.length > 0) {
+      return {
+        label: 'ログインが必要です',
+        detail: hiddenReasons.join(' / ')
+      };
+    }
+
+    return {
+      label: '表示するサービスがありません',
+      detail: ''
+    };
+  }
+
+  return {
+    shouldDisplayProvider,
+    hiddenProviderReason,
+    emptyStateInfo
+  };
 });
