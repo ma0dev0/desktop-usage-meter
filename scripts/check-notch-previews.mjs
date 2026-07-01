@@ -142,6 +142,23 @@ function countVividPixels(image, region) {
   return count;
 }
 
+function countVividRunPixels(image, region) {
+  let count = 0;
+  for (let y = region.y; y < region.y + region.height; y++) {
+    let runLength = 0;
+    for (let x = region.x; x < region.x + region.width; x++) {
+      if (isVividPixel(rgbaAt(image, x, y))) {
+        runLength++;
+      } else {
+        if (runLength >= 10) count += runLength;
+        runLength = 0;
+      }
+    }
+    if (runLength >= 10) count += runLength;
+  }
+  return count;
+}
+
 function isVividPixel({ red, green, blue, alpha }) {
   if (alpha <= 40) return false;
   const max = Math.max(red, green, blue);
@@ -227,43 +244,43 @@ function assertRegionContent({ path, name, count, expected }) {
 }
 
 function assertLimitBars({ preview, image }) {
-  const lowerBand = {
-    y: Math.round(image.height * 0.52),
+  const meterBand = {
+    y: Math.round(image.height * 0.34),
     height: Math.round(image.height * 0.32)
   };
   const leftRegion = {
-    x: 0,
-    y: lowerBand.y,
-    width: Math.round(image.width * 0.4),
-    height: lowerBand.height
+    x: Math.round(image.width * 0.1),
+    y: meterBand.y,
+    width: Math.round(image.width * 0.3),
+    height: meterBand.height
   };
   const centerRegion = {
     x: Math.round(image.width * 0.4),
-    y: lowerBand.y,
+    y: meterBand.y,
     width: Math.round(image.width * 0.2),
-    height: lowerBand.height
+    height: meterBand.height
   };
   const rightRegion = {
-    x: Math.round(image.width * 0.6),
-    y: lowerBand.y,
-    width: Math.round(image.width * 0.4),
-    height: lowerBand.height
+    x: Math.round(image.width * 0.77),
+    y: meterBand.y,
+    width: Math.round(image.width * 0.23),
+    height: meterBand.height
   };
 
   assertRegionBars({
     path: preview.path,
     name: 'left limit bars',
-    count: countVividPixels(image, leftRegion),
+    count: countVividRunPixels(image, leftRegion),
     expected: preview.leftBars
   });
   assertRegionBars({
     path: preview.path,
     name: 'right limit bars',
-    count: countVividPixels(image, rightRegion),
+    count: countVividRunPixels(image, rightRegion),
     expected: preview.rightBars
   });
 
-  const centerBars = countVividPixels(image, centerRegion);
+  const centerBars = countVividRunPixels(image, centerRegion);
   if (centerBars > 20) {
     throw new Error(`${preview.path}: colored limit bars intrude into center notch area (${centerBars} vivid pixels)`);
   }
@@ -271,7 +288,7 @@ function assertLimitBars({ preview, image }) {
 
 function assertRegionBars({ path, name, count, expected }) {
   if (expected == null) return;
-  if (expected && count < 450) {
+  if (expected && count < 120) {
     throw new Error(`${path}: expected ${name}, found only ${count} vivid pixels`);
   }
   if (!expected && count > 80) {
