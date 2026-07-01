@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 4,
+  "updatedAt": "2099-06-30T12:00:00Z",
+  "refreshing": false,
+  "weeklyPaceMode": "calendar",
+  "providers": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "color": "#d97757",
+      "enabled": true,
+      "visible": true,
+      "loggedIn": true,
+      "percentRemaining": 8,
+      "percentUsed": 92,
+      "capturedAt": "2099-06-30T12:00:00Z",
+      "refreshing": false,
+      "refreshError": null,
+      "limits": [
+        {
+          "key": "fivehour",
+          "sourceKey": "session",
+          "label": "5時間",
+          "percentUsed": 92,
+          "percentRemaining": 8,
+          "resetText": "35分後にリセット",
+          "resetAt": "2026-06-30T12:35:00Z",
+          "resetLabel": "21:35にリセット（あと35分）",
+          "expectedUsed": 88,
+          "pace": { "kind": "exhausted", "label": "上限付近", "projected": 100 }
+        },
+        {
+          "key": "weekly",
+          "sourceKey": "weekly",
+          "label": "週間",
+          "percentUsed": 78,
+          "percentRemaining": 22,
+          "resetText": "リセット：2026/07/03 11:00",
+          "resetAt": "2026-07-03T02:00:00Z",
+          "resetLabel": "11:00にリセット（あと2日）",
+          "expectedUsed": 35,
+          "pace": { "kind": "very-fast", "label": "非常に速い", "projected": 180 }
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "color": "#3ecf8e",
+      "enabled": true,
+      "visible": true,
+      "loggedIn": true,
+      "percentRemaining": 12,
+      "percentUsed": 88,
+      "capturedAt": "2099-06-30T12:00:00Z",
+      "refreshing": false,
+      "refreshError": null,
+      "limits": [
+        {
+          "key": "fivehour",
+          "sourceKey": "fivehour",
+          "label": "5時間",
+          "percentUsed": 88,
+          "percentRemaining": 12,
+          "resetText": "リセット：12:35",
+          "resetAt": "2026-06-30T12:35:00Z",
+          "resetLabel": "21:35にリセット（あと35分）",
+          "expectedUsed": 88,
+          "pace": { "kind": "fast", "label": "速い", "projected": 100 }
+        },
+        {
+          "key": "weekly",
+          "sourceKey": "weekly",
+          "label": "週間",
+          "percentUsed": 64,
+          "percentRemaining": 36,
+          "resetText": "リセット：2026/07/03 11:00",
+          "resetAt": "2026-07-03T02:00:00Z",
+          "resetLabel": "11:00にリセット（あと2日）",
+          "expectedUsed": 35,
+          "pace": { "kind": "fast", "label": "速い", "projected": 150 }
+        }
+      ]
+    }
+  ]
+}

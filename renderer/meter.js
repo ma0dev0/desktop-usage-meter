@@ -2,6 +2,10 @@ const appEl = document.getElementById('app');
 const providersEl = document.getElementById('providers');
 const refreshBtn = document.getElementById('refreshBtn');
 const closeBtn = document.getElementById('closeBtn');
+const RELATIVE_REFRESH_MS = 60 * 1000;
+
+let latestRenderData = null;
+let relativeRefreshTimer = null;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -39,6 +43,13 @@ function compactResetLabel(label) {
     .replace(/）$/, '')
     .replace('にリセット済み', ' · リセット済み')
     .replace('にリセット', ' · リセット');
+}
+
+function capturedStatusLabel(result, stale, nowMs) {
+  if (stale) return stale.label;
+  if (!result || !Number.isFinite(result.capturedAt) || !window.Freshness) return null;
+  const prefix = result.loggedIn === false ? '確認' : '更新';
+  return `${prefix} · ${window.Freshness.elapsedLabel(result.capturedAt, nowMs)}`;
 }
 
 function buildUsageRow(label, section, options) {
@@ -94,6 +105,11 @@ function buildUsageRow(label, section, options) {
     } else {
       meta.classList.add('pace-only');
     }
+    if (paceInfo.expectedUsed != null) {
+      const target = el('span', 'pace-target', `目安${paceInfo.expectedUsed}%`);
+      target.title = `現在時刻までの使用目安 ${paceInfo.expectedUsed}%`;
+      meta.appendChild(target);
+    }
     if (paceInfo.pace.kind !== 'unknown') {
       const pace = el('span', 'pace-label', paceInfo.pace.label);
       pace.dataset.kind = paceInfo.pace.kind;
@@ -111,14 +127,58 @@ function buildUsageRow(label, section, options) {
   return row;
 }
 
-function buildProvider(meta, result, weeklyPaceMode) {
+function buildProvider(meta, result, weeklyPaceMode, nowMs, refreshError, isRefreshingProvider) {
+  const stale = window.Freshness && window.Freshness.staleInfo(result, nowMs);
+  const refreshErrorNote = window.RefreshStatus && window.RefreshStatus.refreshErrorNote(
+    refreshError,
+    Boolean(result)
+  );
   const provider = el('article', 'provider');
+  const capturedLabel = capturedStatusLabel(result, stale, nowMs);
+  if (isRefreshingProvider) {
+    provider.classList.add('refreshing-provider');
+    provider.title = '取得中...';
+  }
+  if (refreshErrorNote) {
+    provider.classList.add('refresh-error');
+    provider.title = [provider.title, refreshErrorNote].filter(Boolean).join('\n');
+  }
+  if (stale) {
+    provider.classList.add('stale');
+    provider.title = [provider.title, stale.label].filter(Boolean).join('\n');
+  }
+  provider.dataset.providerId = meta.id;
+  provider.style.setProperty('--provider-color', meta.color || 'var(--accent)');
+  if (provider.title) {
+    provider.setAttribute('aria-label', `${meta.name} ${provider.title.replace(/\n/g, '。 ')}`);
+  }
+
   const head = el('header', 'provider-head');
-  const dot = el('span', 'provider-dot');
-  dot.style.background = meta.color;
-  dot.style.color = meta.color;
-  head.append(dot, el('span', 'provider-name', meta.name));
+  if (capturedLabel) head.classList.add('with-substatus');
+  const icon = el('span', `provider-icon provider-icon-${meta.id}`);
+  icon.setAttribute('aria-hidden', 'true');
+  head.append(icon, el('span', 'provider-name', meta.name));
+  if (isRefreshingProvider) {
+    const spinner = el('span', 'provider-refreshing-icon');
+    spinner.title = '取得中...';
+    spinner.setAttribute('aria-label', '取得中...');
+    head.appendChild(spinner);
+  }
+  if (stale) {
+    const staleClock = el('span', 'stale-clock');
+    staleClock.title = stale.label;
+    staleClock.setAttribute('aria-label', stale.label);
+    head.appendChild(staleClock);
+  }
   provider.appendChild(head);
+
+  if (capturedLabel) {
+    provider.appendChild(el('div', 'provider-substatus', capturedLabel));
+  }
+
+  if (refreshErrorNote) {
+    provider.appendChild(el('div', 'provider-note provider-error-note', refreshErrorNote));
+  }
 
   if (result && result.loggedIn === false) {
     provider.appendChild(el('div', 'provider-note', 'ログインが必要です'));
@@ -161,9 +221,39 @@ function resizeToContent() {
   requestAnimationFrame(() => window.api.resizeMeter(Math.ceil(appEl.getBoundingClientRect().height)));
 }
 
+function scheduleRelativeRefresh() {
+  if (relativeRefreshTimer || typeof setInterval !== 'function') return;
+  relativeRefreshTimer = setInterval(() => {
+    if (latestRenderData) render(latestRenderData);
+  }, RELATIVE_REFRESH_MS);
+}
+
+function refreshingLabel(data) {
+  const names = ((data && data.providers) || [])
+    .filter(provider => data.refreshingProviders && data.refreshingProviders[provider.id])
+    .map(provider => provider.name || provider.id)
+    .filter(Boolean);
+  return names.length > 0 ? `取得中: ${names.join(' / ')}` : '取得中...';
+}
+
+function setRefreshing(isRefreshing, data) {
+  const canRefresh = !data || data.canRefresh !== false;
+  appEl.classList.toggle('refreshing', isRefreshing);
+  refreshBtn.classList.toggle('spin', isRefreshing);
+  refreshBtn.disabled = isRefreshing || !canRefresh;
+  refreshBtn.title = !canRefresh
+    ? '対象サービスがOFFです'
+    : (isRefreshing ? refreshingLabel(data) : '更新');
+  refreshBtn.setAttribute('aria-label', refreshBtn.title);
+}
+
 function render(data) {
   if (!data) return;
+  latestRenderData = data;
+  scheduleRelativeRefresh();
   applyTheme(data.prefs && data.prefs.theme);
+  setRefreshing(Boolean(data.refreshing), data);
+  const nowMs = Date.now();
 
   const weeklyPaceMode = data.prefs && data.prefs.weeklyPaceMode === 'weekdays'
     ? 'weekdays'
@@ -176,7 +266,16 @@ function render(data) {
     )
   );
   if (enabled.length === 0) {
-    providersEl.appendChild(el('div', 'empty-note', '表示するサービスがありません'));
+    const emptyState = window.ProviderVisibility.emptyStateInfo(
+      data.providers || [],
+      data.results || {}
+    );
+    const note = el('div', 'empty-note');
+    note.appendChild(el('strong', 'empty-title', emptyState.label));
+    if (emptyState.detail) {
+      note.appendChild(el('span', 'empty-detail', emptyState.detail));
+    }
+    providersEl.appendChild(note);
     resizeToContent();
     return;
   }
@@ -185,7 +284,10 @@ function render(data) {
     providersEl.appendChild(buildProvider(
       meta,
       data.results && data.results[meta.id],
-      weeklyPaceMode
+      weeklyPaceMode,
+      nowMs,
+      data.refreshErrors && data.refreshErrors[meta.id],
+      Boolean(data.refreshingProviders && data.refreshingProviders[meta.id])
     ));
   }
   resizeToContent();
@@ -196,8 +298,9 @@ if (window.api) {
   window.api.getState().then(render);
 
   refreshBtn.addEventListener('click', () => {
-    refreshBtn.classList.add('spin');
-    Promise.resolve(window.api.refresh()).finally(() => refreshBtn.classList.remove('spin'));
+    if (refreshBtn.disabled) return;
+    setRefreshing(true, null);
+    Promise.resolve(window.api.refresh()).catch(() => setRefreshing(false));
   });
   closeBtn.addEventListener('click', () => window.api.hide());
 }

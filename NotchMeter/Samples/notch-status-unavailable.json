@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 4,
+  "updatedAt": "2099-06-30T12:00:00Z",
+  "refreshing": false,
+  "weeklyPaceMode": "calendar",
+  "providers": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "color": "#d97757",
+      "enabled": true,
+      "visible": true,
+      "loggedIn": false,
+      "percentRemaining": null,
+      "percentUsed": null,
+      "capturedAt": "2099-06-30T12:00:00Z",
+      "refreshing": false,
+      "refreshError": null,
+      "limits": []
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "color": "#3ecf8e",
+      "enabled": true,
+      "visible": true,
+      "loggedIn": true,
+      "percentRemaining": null,
+      "percentUsed": null,
+      "capturedAt": "2099-06-30T12:00:00Z",
+      "refreshing": false,
+      "refreshError": null,
+      "limits": []
+    }
+  ]
+}

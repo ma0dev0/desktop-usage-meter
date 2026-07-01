@@ -3,13 +3,34 @@
 // - トレイ常駐＋常時最前面・透過のメーター窓に表示する
 // - ログインはアプリ内（persist パーティション）で1回だけ
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  ipcMain,
+  nativeImage,
+  screen,
+  globalShortcut,
+  clipboard
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
+const { writeJsonAtomic } = require('./src/atomicFile');
 const { providers, isLoginUrl } = require('./src/providers');
-const { shouldDisplayProvider } = require('./src/providerVisibility');
+const { buildStatusSummary } = require('./src/statusSummary');
+const { buildNotchStatus } = require('./src/notchStatus');
+const {
+  appendLogText,
+  buildLogHeader,
+  buildNotchMeterCommand,
+  getNotchMeterAvailability,
+  statusLabel: notchMeterStatusLabel
+} = require('./src/notchMeterLauncher');
 
 const PARTITION = 'persist:usage';
+const DISPLAY_REFRESH_MS = 60 * 1000;
 const EXTRACT_JS =
   "(() => ({ url: location.href, title: document.title, bodyText: (document.body && document.body.innerText) || '' }))()";
 
@@ -21,21 +42,52 @@ const DEFAULT_PREFS = {
   weeklyPaceMode: 'calendar',
   providers: { claude: true, codex: true },
   autoLaunch: false,
+  notchMeterAutoStart: false,
   meterBounds: null,
   meterVisible: true
 };
 
 let prefs = Object.assign({}, DEFAULT_PREFS);
 let results = { claude: null, codex: null };
+let refreshErrors = {};
+let refreshingProviders = {};
 
 let tray = null;
 let meterWin = null;
 const scrapeWins = {};
 let refreshTimer = null;
+let displayRefreshTimer = null;
 let refreshing = false;
+let notchMeterProc = null;
+let notchMeterLastError = null;
+let notchMeterLaunching = false;
+let notchMeterLastLog = '';
 
 function stateFile() {
   return path.join(app.getPath('userData'), 'state.json');
+}
+
+function notchStatusFile() {
+  return path.join(app.getPath('userData'), 'notch-status.json');
+}
+
+function notchMeterLogFile() {
+  return path.join(app.getPath('userData'), 'notchmeter.log');
+}
+
+function writeNotchStatus() {
+  try {
+    writeJsonAtomic(notchStatusFile(), buildNotchStatus({
+      providers,
+      results,
+      prefs,
+      refreshErrors,
+      refreshing,
+      refreshingProviders
+    }));
+  } catch (e) {
+    /* 表示用JSONの出力失敗は本体動作を止めない */
+  }
 }
 
 function loadState() {
@@ -47,11 +99,13 @@ function loadState() {
   } catch (e) {
     /* 初回起動 */
   }
+  writeNotchStatus();
 }
 
 function saveState() {
   try {
-    fs.writeFileSync(stateFile(), JSON.stringify({ prefs, results }, null, 2));
+    writeJsonAtomic(stateFile(), { prefs, results });
+    writeNotchStatus();
   } catch (e) {
     /* 失敗は無視 */
   }
@@ -112,30 +166,54 @@ async function scrapeOne(provider) {
 
 async function refreshAll(reason) {
   if (refreshing) return;
-  refreshing = true;
-  try {
-    const ids = Object.keys(providers).filter(id => prefs.providers[id]);
-    for (const id of ids) {
-      const res = await scrapeOne(providers[id]);
-      if (res && !res.error) results[id] = res;
-    }
-    saveState();
+  const ids = enabledProviderIds();
+  if (ids.length === 0) {
+    refreshingProviders = {};
+    writeNotchStatus();
     pushUpdate();
     updateTray();
+    return;
+  }
+  for (const id of ids) {
+    delete refreshErrors[id];
+  }
+  refreshing = true;
+  refreshingProviders = {};
+  writeNotchStatus();
+  pushUpdate();
+  updateTray();
+  try {
+    for (const id of ids) {
+      refreshingProviders = { [id]: true };
+      writeNotchStatus();
+      pushUpdate();
+      updateTray();
+
+      const res = await scrapeOne(providers[id]);
+      if (res && res.error) {
+        refreshErrors[id] = res.error;
+      } else if (res) {
+        results[id] = res;
+        delete refreshErrors[id];
+      }
+      refreshingProviders = {};
+      writeNotchStatus();
+      pushUpdate();
+      updateTray();
+    }
+    refreshing = false;
+    refreshingProviders = {};
+    saveState();
   } finally {
     refreshing = false;
+    refreshingProviders = {};
+    writeNotchStatus();
+    pushUpdate();
+    updateTray();
   }
 }
 
 // --- 表示・トレイ ---
-
-function pctText(res) {
-  if (!res) return '—';
-  if (res.loggedIn === false) return '未ログイン';
-  if (res.determined && res.percentRemaining != null) return '残り' + res.percentRemaining + '%';
-  if (res.relatedFound) return '?';
-  return '—';
-}
 
 function providerMeta() {
   return Object.keys(providers).map(id => ({
@@ -146,22 +224,209 @@ function providerMeta() {
   }));
 }
 
+function enabledProviderIds() {
+  return Object.keys(providers).filter(id => prefs.providers[id]);
+}
+
+function canRefreshProviders() {
+  return enabledProviderIds().length > 0;
+}
+
 function pushUpdate() {
   if (meterWin && !meterWin.isDestroyed()) {
-    meterWin.webContents.send('update', { results, prefs, providers: providerMeta() });
+    meterWin.webContents.send('update', appStatePayload());
   }
+}
+
+function appStatePayload() {
+  return {
+    results,
+    prefs,
+    providers: providerMeta(),
+    refreshing,
+    refreshingProviders,
+    refreshErrors,
+    canRefresh: canRefreshProviders()
+  };
+}
+
+function refreshingStatusLabel(prefix = '取得中') {
+  const names = Object.keys(refreshingProviders || {})
+    .filter(id => refreshingProviders[id])
+    .map(id => providers[id] && providers[id].name)
+    .filter(Boolean);
+  return names.length > 0 ? `${prefix}: ${names.join(' / ')}` : `${prefix}...`;
+}
+
+function statusSummaryText(nowMs = Date.now()) {
+  return buildStatusSummary({
+    providers: providerMeta(),
+    results,
+    refreshErrors,
+    refreshing,
+    refreshingProviders,
+    nowMs
+  });
+}
+
+function updateTrayTooltip() {
+  if (!tray) return;
+  tray.setToolTip(statusSummaryText());
 }
 
 function updateTray() {
   if (!tray) return;
-  const parts = Object.keys(providers)
-    .filter(id => shouldDisplayProvider(
-      { id, enabled: Boolean(prefs.providers[id]) },
-      results[id]
-    ))
-    .map(id => providers[id].name + ' ' + pctText(results[id]));
-  tray.setToolTip('Usage Meter\n' + parts.join('\n'));
+  updateTrayTooltip();
   tray.setContextMenu(buildTrayMenu());
+}
+
+function copyVisibleStatus() {
+  clipboard.writeText(statusSummaryText());
+}
+
+function canRunNotchMeter() {
+  return notchMeterAvailability().available;
+}
+
+function notchMeterModeLabel() {
+  return notchMeterAvailability().modeLabel;
+}
+
+function isNotchMeterRunning() {
+  return Boolean(notchMeterProc && !notchMeterProc.killed);
+}
+
+function notchMeterAvailability() {
+  return getNotchMeterAvailability({
+    platform: process.platform,
+    appRoot: __dirname,
+    resourcesPath: process.resourcesPath,
+    existsSync: fs.existsSync
+  });
+}
+
+function notchMeterCommand() {
+  return buildNotchMeterCommand({
+    platform: process.platform,
+    appRoot: __dirname,
+    resourcesPath: process.resourcesPath,
+    existsSync: fs.existsSync
+  });
+}
+
+function resetNotchMeterLog(command) {
+  const header = buildLogHeader(command);
+  notchMeterLastLog = header;
+  try {
+    fs.writeFileSync(notchMeterLogFile(), header);
+  } catch (e) {
+    /* ログ出力失敗は起動を止めない */
+  }
+}
+
+function appendNotchMeterLog(chunk) {
+  const nextLog = appendLogText(notchMeterLastLog, chunk);
+  if (nextLog === notchMeterLastLog) return;
+  notchMeterLastLog = nextLog;
+  try {
+    fs.appendFileSync(notchMeterLogFile(), String(chunk || ''));
+  } catch (e) {
+    /* ログ出力失敗は起動を止めない */
+  }
+}
+
+function startNotchMeter() {
+  if (!canRunNotchMeter() || isNotchMeterRunning() || notchMeterLaunching) return;
+
+  writeNotchStatus();
+  notchMeterLastError = null;
+  notchMeterLaunching = true;
+
+  const executable = notchMeterCommand();
+  resetNotchMeterLog(executable);
+  const child = spawn(executable.command, executable.args, {
+    cwd: executable.cwd,
+    detached: true,
+    env: Object.assign({}, process.env, {
+      USAGE_METER_STATUS_PATH: notchStatusFile()
+    }),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  notchMeterProc = child;
+  child.stdout.on('data', appendNotchMeterLog);
+  child.stderr.on('data', appendNotchMeterLog);
+
+  child.once('error', error => {
+    notchMeterLaunching = false;
+    if (notchMeterProc === child) {
+      notchMeterProc = null;
+    }
+    notchMeterLastError = '起動失敗: ' + error.message;
+    appendNotchMeterLog('\n[' + new Date().toISOString() + '] spawn error: ' + error.message + '\n');
+    updateTray();
+  });
+
+  child.once('exit', (code, signal) => {
+    notchMeterLaunching = false;
+    if (notchMeterProc === child) {
+      notchMeterProc = null;
+      if (code && signal !== 'SIGTERM') {
+        notchMeterLastError = '終了コード ' + code;
+        appendNotchMeterLog('\n[' + new Date().toISOString() + '] exit code ' + code + '\n');
+      } else if (signal && signal !== 'SIGTERM') {
+        notchMeterLastError = '終了シグナル ' + signal;
+        appendNotchMeterLog('\n[' + new Date().toISOString() + '] exit signal ' + signal + '\n');
+      }
+      updateTray();
+    }
+  });
+
+  setTimeout(() => {
+    if (notchMeterProc === child) {
+      notchMeterLaunching = false;
+      updateTray();
+    }
+  }, 1500);
+
+  updateTray();
+}
+
+function stopNotchMeter() {
+  if (!notchMeterProc) return;
+  const child = notchMeterProc;
+  notchMeterProc = null;
+  notchMeterLaunching = false;
+  try {
+    if (process.platform === 'win32') {
+      child.kill();
+    } else {
+      process.kill(-child.pid, 'SIGTERM');
+    }
+  } catch (error) {
+    try {
+      child.kill();
+    } catch (killError) {
+      notchMeterLastError = '停止失敗: ' + killError.message;
+    }
+  }
+  updateTray();
+}
+
+function copyNotchStatusPath() {
+  clipboard.writeText(notchStatusFile());
+}
+
+function copyNotchMeterLog() {
+  let log = notchMeterLastLog;
+  if (!log) {
+    try {
+      log = fs.readFileSync(notchMeterLogFile(), 'utf8');
+    } catch (e) {
+      log = '';
+    }
+  }
+  clipboard.writeText(log || 'NotchMeter の起動ログはまだありません。');
 }
 
 function buildTrayMenu() {
@@ -170,9 +435,18 @@ function buildTrayMenu() {
   return Menu.buildFromTemplate([
     {
       label: meterWin && meterWin.isVisible() ? 'メーターを隠す' : 'メーターを表示',
+      accelerator: 'CommandOrControl+Shift+U',
       click: toggleMeter
     },
-    { label: '再取得', click: () => refreshAll('manual') },
+    notchMeterMenuItem(),
+    {
+      label: !canRefreshProviders()
+        ? '対象サービスなし'
+        : (refreshing ? refreshingStatusLabel('再取得中') : '再取得'),
+      enabled: canRefreshProviders() && !refreshing,
+      click: () => refreshAll('manual')
+    },
+    { label: '現在の状態をコピー', click: copyVisibleStatus },
     { type: 'separator' },
     {
       label: '透明度',
@@ -234,6 +508,56 @@ function buildTrayMenu() {
     },
     { label: '終了', click: () => { app.isQuitting = true; app.quit(); } }
   ]);
+}
+
+function notchMeterMenuItem() {
+  const available = canRunNotchMeter();
+  const running = isNotchMeterRunning();
+  const statusLabel = notchMeterStatusLabel({
+    available,
+    launching: notchMeterLaunching,
+    running,
+    lastError: notchMeterLastError
+  });
+  const modeLabel = available ? notchMeterModeLabel() : 'macOSのみ';
+
+  return {
+    label: 'NotchMeter（ノッチ表示）',
+    enabled: process.platform === 'darwin',
+    submenu: [
+      { label: statusLabel, enabled: false },
+      { label: modeLabel, enabled: false },
+      { type: 'separator' },
+      {
+        label: '起動',
+        enabled: available && !running && !notchMeterLaunching,
+        click: startNotchMeter
+      },
+      {
+        label: '停止',
+        enabled: running || notchMeterLaunching,
+        click: stopNotchMeter
+      },
+      {
+        label: '本体起動時に開く',
+        type: 'checkbox',
+        checked: Boolean(prefs.notchMeterAutoStart),
+        enabled: available,
+        click: menuItem => {
+          prefs.notchMeterAutoStart = menuItem.checked;
+          saveState();
+          if (menuItem.checked) startNotchMeter();
+        }
+      },
+      { type: 'separator' },
+      { label: 'JSONパスをコピー', click: copyNotchStatusPath },
+      {
+        label: '起動ログをコピー',
+        enabled: Boolean(notchMeterLastLog || notchMeterLastError || fs.existsSync(notchMeterLogFile())),
+        click: copyNotchMeterLog
+      }
+    ]
+  };
 }
 
 function themeItem(label, value) {
@@ -356,6 +680,17 @@ function startTimer() {
   refreshTimer = setInterval(() => refreshAll('timer'), min * 60 * 1000);
 }
 
+function startDisplayRefreshTimer() {
+  if (displayRefreshTimer) clearInterval(displayRefreshTimer);
+  displayRefreshTimer = setInterval(updateTrayTooltip, DISPLAY_REFRESH_MS);
+}
+
+function stopDisplayRefreshTimer() {
+  if (!displayRefreshTimer) return;
+  clearInterval(displayRefreshTimer);
+  displayRefreshTimer = null;
+}
+
 function applyAutoLaunch() {
   try {
     app.setLoginItemSettings({ openAtLogin: Boolean(prefs.autoLaunch) });
@@ -373,9 +708,20 @@ function createTray() {
   updateTray();
 }
 
+function registerShortcuts() {
+  try {
+    const ok = globalShortcut.register('CommandOrControl+Shift+U', toggleMeter);
+    if (!ok) {
+      console.warn('global shortcut registration failed: CommandOrControl+Shift+U');
+    }
+  } catch (error) {
+    console.warn('global shortcut registration failed', error);
+  }
+}
+
 // --- IPC ---
 
-ipcMain.handle('getState', () => ({ results, prefs, providers: providerMeta() }));
+ipcMain.handle('getState', () => appStatePayload());
 ipcMain.handle('refresh', () => refreshAll('renderer'));
 ipcMain.on('openLogin', (e, id) => openLogin(id));
 ipcMain.on('hideMeter', () => { if (meterWin) { meterWin.hide(); prefs.meterVisible = false; saveState(); updateTray(); } });
@@ -401,13 +747,21 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => toggleMeter());
+  app.on('will-quit', () => {
+    stopDisplayRefreshTimer();
+    stopNotchMeter();
+    globalShortcut.unregisterAll();
+  });
 
   app.whenReady().then(() => {
     loadState();
     applyAutoLaunch();
     createTray();
+    if (prefs.notchMeterAutoStart) startNotchMeter();
+    registerShortcuts();
     createMeter();
     startTimer();
+    startDisplayRefreshTimer();
     refreshAll('startup');
   });
 
