@@ -163,7 +163,7 @@ final class NotchMeterView: NSView {
 
     private func providerContentWidth(for provider: ProviderStatus, maxWidth: CGFloat) -> CGFloat {
         guard NotchStatusFormatting.visibleLimits(for: provider).isEmpty else {
-            return maxWidth
+            return min(maxWidth, max(164, providerInlineWidth(provider)))
         }
         return min(maxWidth, max(78, providerHeaderWidth(provider) + 4))
     }
@@ -177,11 +177,12 @@ final class NotchMeterView: NSView {
     }
 
     private func providerBackgroundRect(for rect: CGRect) -> CGRect {
-        CGRect(
-            x: rect.minX - 10,
-            y: bounds.minY + 3,
-            width: rect.width + 20,
-            height: bounds.height - 6
+        let backgroundHeight = min(max(22, bounds.height - 10), 26)
+        return CGRect(
+            x: rect.minX - 8,
+            y: bounds.midY - backgroundHeight / 2,
+            width: rect.width + 16,
+            height: backgroundHeight
         )
     }
 
@@ -203,18 +204,31 @@ final class NotchMeterView: NSView {
             xRadius: backgroundRect.height / 2,
             yRadius: backgroundRect.height / 2
         )
-        let backgroundAlpha: CGFloat
-        if stale {
-            backgroundAlpha = hovered ? 0.7 : 0.62
-        } else {
-            backgroundAlpha = hovered ? 0.9 : 0.82
-        }
+        let backgroundAlpha: CGFloat = stale
+            ? (hovered ? 0.56 : 0.48)
+            : (hovered ? 0.66 : 0.54)
         NSColor(calibratedWhite: 0.02, alpha: backgroundAlpha).setFill()
         background.fill()
 
         if (urgency != .normal || hasRefreshError || isRefreshing) && !stale {
-            accentColor.withAlphaComponent(hovered ? 0.16 : 0.1).setFill()
+            accentColor.withAlphaComponent(hovered ? 0.08 : 0.045).setFill()
             background.fill()
+        }
+
+        if urgency != .normal || hasRefreshError || isRefreshing {
+            let accentRect = CGRect(
+                x: backgroundRect.minX + 5,
+                y: backgroundRect.midY - 5,
+                width: 2,
+                height: 10
+            )
+            let accent = NSBezierPath(
+                roundedRect: accentRect,
+                xRadius: 1,
+                yRadius: 1
+            )
+            accentColor.withAlphaComponent(stale ? 0.28 : (hovered ? 0.78 : 0.64)).setFill()
+            accent.fill()
         }
 
         let border = NSBezierPath(
@@ -222,14 +236,8 @@ final class NotchMeterView: NSView {
             xRadius: (backgroundRect.height - 1) / 2,
             yRadius: (backgroundRect.height - 1) / 2
         )
-        border.lineWidth = hovered ? 1.4 : (urgency == .normal && !hasRefreshError && !isRefreshing ? 1 : 1.2)
-        accentColor.withAlphaComponent(borderAlpha(
-            stale: stale,
-            hovered: hovered,
-            urgency: urgency,
-            hasRefreshError: hasRefreshError,
-            isRefreshing: isRefreshing
-        )).setStroke()
+        border.lineWidth = 1
+        NSColor.white.withAlphaComponent(hovered ? 0.18 : 0.08).setStroke()
         border.stroke()
     }
 
@@ -309,6 +317,7 @@ final class NotchMeterView: NSView {
         let percentText = providerValueText(provider)
         let textColor = percentTextColor(for: provider)
         let stale = NotchStatusFormatting.isStale(provider: provider, in: status)
+        let limits = Array(NotchStatusFormatting.visibleLimits(for: provider).prefix(2))
 
         let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
         let attributes: [NSAttributedString.Key: Any] = [
@@ -317,7 +326,7 @@ final class NotchMeterView: NSView {
             .kern: 0
         ]
         let size = percentText.size(withAttributes: attributes)
-        let iconSize: CGFloat = 14
+        let iconSize: CGFloat = 13
         let gap: CGFloat = 6
         let hasRefreshError = NotchStatusFormatting.hasRefreshError(provider)
         let isRefreshing = NotchStatusFormatting.isRefreshing(provider)
@@ -327,12 +336,23 @@ final class NotchMeterView: NSView {
         let refreshingGap: CGFloat = isRefreshing ? 5 : 0
         let staleIconSize: CGFloat = stale ? 9 : 0
         let staleGap: CGFloat = stale ? 5 : 0
-        let totalWidth = iconSize + gap + size.width
+        let headerWidth = iconSize + gap + size.width
             + errorGap + errorIconSize
             + refreshingGap + refreshingIconSize
             + staleGap + staleIconSize
+        let limitGroupGap: CGFloat = limits.isEmpty ? 0 : 12
+        let limitGap: CGFloat = 7
+        let availableLimitWidth = max(
+            0,
+            rect.width - headerWidth - limitGroupGap - CGFloat(max(0, limits.count - 1)) * limitGap
+        )
+        let limitWidth = limits.isEmpty ? 0 : floor(availableLimitWidth / CGFloat(limits.count))
+        let totalWidth = headerWidth
+            + limitGroupGap
+            + CGFloat(limits.count) * limitWidth
+            + CGFloat(max(0, limits.count - 1)) * limitGap
         let startX = alignRight ? rect.maxX - totalWidth : rect.minX
-        let centerY = bounds.height >= 36 ? bounds.minY + 11 : bounds.minY + 8
+        let centerY = bounds.midY
 
         let iconRect = CGRect(
             x: startX,
@@ -384,26 +404,20 @@ final class NotchMeterView: NSView {
             drawStaleIcon(in: staleRect)
         }
 
-        let limits = NotchStatusFormatting.visibleLimits(for: provider)
         guard !limits.isEmpty else {
             return
         }
 
-        let barHeight: CGFloat = bounds.height >= 36 ? 5 : 4
-        let barY = bounds.maxY - (bounds.height >= 36 ? 11 : 8) - barHeight
-        let itemGap: CGFloat = 8
-        let itemWidth = (rect.width - itemGap) / 2
-        let firstRect = CGRect(x: rect.minX, y: barY, width: itemWidth, height: barHeight)
-        let secondRect = CGRect(
-            x: firstRect.maxX + itemGap,
-            y: barY,
-            width: itemWidth,
-            height: barHeight
-        )
-
-        drawLimit(limits[0], provider: provider, in: firstRect)
-        if limits.count > 1 {
-            drawLimit(limits[1], provider: provider, in: secondRect)
+        var limitX = statusIconX + limitGroupGap
+        for limit in limits {
+            let limitRect = CGRect(
+                x: limitX,
+                y: centerY - 6,
+                width: limitWidth,
+                height: 12
+            )
+            drawLimit(limit, provider: provider, in: limitRect)
+            limitX += limitWidth + limitGap
         }
     }
 
@@ -475,32 +489,33 @@ final class NotchMeterView: NSView {
         provider: ProviderStatus,
         in rect: CGRect
     ) {
-        let labelWidth: CGFloat = 18
+        let labelWidth: CGFloat = limit.key == "weekly" ? 11 : 15
         let label = shortLimitName(limit.key)
-        let labelFont = NSFont.monospacedSystemFont(ofSize: 8, weight: .bold)
+        let labelFont = NSFont.monospacedSystemFont(ofSize: 7.5, weight: .bold)
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: labelFont,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.78),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.52),
             .kern: 0
         ]
         let labelSize = label.size(withAttributes: labelAttributes)
         label.draw(
-            at: CGPoint(x: rect.minX, y: rect.midY - labelSize.height / 2 + 0.5),
+            at: CGPoint(x: rect.minX, y: rect.midY - labelSize.height / 2 + 0.3),
             withAttributes: labelAttributes
         )
 
+        let barHeight: CGFloat = 4
         let barRect = CGRect(
             x: rect.minX + labelWidth,
-            y: rect.minY,
+            y: rect.midY - barHeight / 2,
             width: max(16, rect.width - labelWidth),
-            height: rect.height
+            height: barHeight
         )
         let track = NSBezierPath(
             roundedRect: barRect,
-            xRadius: rect.height / 2,
-            yRadius: rect.height / 2
+            xRadius: barHeight / 2,
+            yRadius: barHeight / 2
         )
-        NSColor.white.withAlphaComponent(0.3).setFill()
+        NSColor.white.withAlphaComponent(0.16).setFill()
         track.fill()
 
         if let used = limit.percentUsed, used > 0 {
@@ -508,49 +523,54 @@ final class NotchMeterView: NSView {
             let fillRect = CGRect(
                 x: barRect.minX,
                 y: barRect.minY,
-                width: max(rect.height, barRect.width * usedRatio),
-                height: rect.height
+                width: max(barHeight, barRect.width * usedRatio),
+                height: barHeight
             )
             let fill = NSBezierPath(
                 roundedRect: fillRect,
-                xRadius: rect.height / 2,
-                yRadius: rect.height / 2
+                xRadius: barHeight / 2,
+                yRadius: barHeight / 2
             )
             usageColor(for: limit, used: used)
-                .withAlphaComponent(NotchStatusFormatting.isStale(provider: provider, in: status) ? 0.58 : 1)
+                .withAlphaComponent(NotchStatusFormatting.isStale(provider: provider, in: status) ? 0.42 : 0.86)
                 .setFill()
             fill.fill()
         }
 
         if let expected = limit.expectedUsed {
             let markerX = barRect.minX + barRect.width * CGFloat(clampPercent(expected)) / 100
-            let haloRect = CGRect(
-                x: markerX - 1.75,
-                y: rect.minY - 2.5,
-                width: 3.5,
-                height: rect.height + 5
+            let shadowRect = CGRect(
+                x: markerX - 1.3,
+                y: barRect.minY - 2,
+                width: 2.6,
+                height: barRect.height + 4
             )
-            let halo = NSBezierPath(
-                roundedRect: haloRect,
-                xRadius: 1.75,
-                yRadius: 1.75
+            let shadow = NSBezierPath(
+                roundedRect: shadowRect,
+                xRadius: 1.3,
+                yRadius: 1.3
             )
-            NSColor.black.withAlphaComponent(0.88).setFill()
-            halo.fill()
+            NSColor.black.withAlphaComponent(0.55).setFill()
+            shadow.fill()
 
-            let markerRect = haloRect.insetBy(dx: 0.9, dy: 0.9)
+            let markerRect = CGRect(
+                x: markerX - 0.6,
+                y: barRect.minY - 1.6,
+                width: 1.2,
+                height: barRect.height + 3.2
+            )
             let marker = NSBezierPath(
                 roundedRect: markerRect,
-                xRadius: 0.85,
-                yRadius: 0.85
+                xRadius: 0.6,
+                yRadius: 0.6
             )
-            NSColor(calibratedRed: 1, green: 0.86, blue: 0.25, alpha: 1).setFill()
+            NSColor.white.withAlphaComponent(0.92).setFill()
             marker.fill()
         }
     }
 
     private func shortLimitName(_ key: String) -> String {
-        key == "weekly" ? "W" : "5h"
+        key == "weekly" ? "週" : "5h"
     }
 
     private func providerValueText(_ provider: ProviderStatus) -> String {
@@ -566,7 +586,7 @@ final class NotchMeterView: NSView {
             .font: font,
             .kern: 0
         ]
-        let iconSize: CGFloat = 14
+        let iconSize: CGFloat = 13
         let gap: CGFloat = 6
         let textWidth = providerValueText(provider).size(withAttributes: attributes).width
         let hasRefreshError = NotchStatusFormatting.hasRefreshError(provider)
@@ -577,6 +597,22 @@ final class NotchMeterView: NSView {
             + (hasRefreshError ? 14 : 0)
             + (isRefreshing ? 14 : 0)
             + (stale ? 14 : 0))
+    }
+
+    private func providerInlineWidth(_ provider: ProviderStatus) -> CGFloat {
+        let limits = NotchStatusFormatting.visibleLimits(for: provider)
+        guard !limits.isEmpty else {
+            return providerHeaderWidth(provider) + 4
+        }
+        let visibleLimitCount = min(limits.count, 2)
+        let limitGap: CGFloat = 7
+        let targetLimitWidth: CGFloat = 68
+        return ceil(
+            providerHeaderWidth(provider)
+                + 12
+                + CGFloat(visibleLimitCount) * targetLimitWidth
+                + CGFloat(max(0, visibleLimitCount - 1)) * limitGap
+        )
     }
 
     private func drawStaleIcon(in rect: CGRect) {
@@ -683,19 +719,19 @@ final class NotchMeterView: NSView {
         if NotchStatusFormatting.isStale(provider: provider, in: status) {
             return NSColor.white.withAlphaComponent(0.64)
         }
-        guard provider.percentRemaining != nil else {
+        guard let remaining = provider.percentRemaining else {
             return NSColor.white.withAlphaComponent(0.9)
         }
-        switch NotchStatusFormatting.providerUrgency(for: provider) {
-        case .critical:
+        if remaining <= 10 {
             return NSColor.systemRed
-        case .warning:
-            return NSColor.systemOrange
-        case .caution:
-            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
-        case .normal:
-            return NSColor.white.withAlphaComponent(0.94)
         }
+        if remaining <= 25 {
+            return NSColor.systemOrange
+        }
+        if remaining <= 40 {
+            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
+        }
+        return NSColor.white.withAlphaComponent(0.94)
     }
 
     private func providerAccentColor(
@@ -727,34 +763,6 @@ final class NotchMeterView: NSView {
             return NSColor.systemBlue
         }
         return providerAccentColor(for: provider, urgency: urgency)
-    }
-
-    private func borderAlpha(
-        stale: Bool,
-        hovered: Bool,
-        urgency: NotchStatusFormatting.ProviderUrgency,
-        hasRefreshError: Bool,
-        isRefreshing: Bool
-    ) -> CGFloat {
-        if hasRefreshError {
-            if stale {
-                return 0.24
-            }
-            return hovered ? 0.58 : 0.44
-        }
-        if isRefreshing {
-            if stale {
-                return 0.2
-            }
-            return hovered ? 0.48 : 0.34
-        }
-        if stale {
-            return urgency == .normal ? 0.1 : 0.18
-        }
-        if hovered {
-            return urgency == .normal ? 0.34 : 0.52
-        }
-        return urgency == .normal ? 0.18 : 0.38
     }
 
     private func providerColor(_ hex: String?) -> NSColor {
