@@ -220,6 +220,15 @@ for (const preview of previews) {
       count: countOpaquePixels(image, rightRegion),
       expected: preview.rightContent
     });
+    assertNotchAdjacentContent({
+      path: preview.path,
+      image,
+      safeGap,
+      leftRegion,
+      rightRegion,
+      leftExpected: preview.leftContent,
+      rightExpected: preview.rightContent
+    });
   }
 
   assertLimitBars({ preview, image });
@@ -241,6 +250,62 @@ function assertRegionContent({ path, name, count, expected }) {
   if (!expected && count > 50) {
     throw new Error(`${path}: unexpected ${name} content (${count} pixels)`);
   }
+}
+
+function assertNotchAdjacentContent({
+  path,
+  image,
+  safeGap,
+  leftRegion,
+  rightRegion,
+  leftExpected,
+  rightExpected
+}) {
+  const maxDistanceFromNotch = Math.round(image.width * 0.08);
+
+  if (leftExpected) {
+    const leftBounds = opaqueBounds(image, leftRegion);
+    const leftDistance = safeGap.x - (leftBounds.x + leftBounds.width);
+    if (leftDistance > maxDistanceFromNotch) {
+      throw new Error(`${path}: left content is too far from notch (${leftDistance}px)`);
+    }
+  }
+
+  if (rightExpected) {
+    const rightBounds = opaqueBounds(image, rightRegion);
+    const rightDistance = rightBounds.x - (safeGap.x + safeGap.width);
+    if (rightDistance > maxDistanceFromNotch) {
+      throw new Error(`${path}: right content is too far from notch (${rightDistance}px)`);
+    }
+  }
+}
+
+function opaqueBounds(image, region) {
+  let minX = region.x + region.width;
+  let minY = region.y + region.height;
+  let maxX = region.x - 1;
+  let maxY = region.y - 1;
+
+  for (let y = region.y; y < region.y + region.height; y++) {
+    for (let x = region.x; x < region.x + region.width; x++) {
+      if (alphaAt(image, x, y) <= 16) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    throw new Error('expected opaque content bounds, found none');
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1
+  };
 }
 
 function assertLimitBars({ preview, image }) {
