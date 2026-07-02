@@ -161,9 +161,61 @@ test('取得エラー中のプロバイダーは通知しない', () => {
   assert.deepEqual(result.state, { usage: {}, resets: {} });
 });
 
+test('古い使用量では使用率通知を出さず通知済み状態を保持する', () => {
+  const existingState = {
+    usage: {
+      'claude:fivehour': {
+        cycleID: String(baseNow + 180 * MINUTE_MS),
+        threshold: 90
+      }
+    },
+    resets: {}
+  };
+  const result = evaluateThresholdNotifications({
+    status: status({
+      used: 96,
+      capturedAt: baseNow - 20 * MINUTE_MS
+    }),
+    state: existingState,
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.usage, existingState.usage);
+});
+
+test('古いデータでも確定済みの5時間リセット時刻が近ければ通知する', () => {
+  const result = evaluateThresholdNotifications({
+    status: status({
+      used: 40,
+      resetInMin: 10,
+      capturedAt: baseNow - 20 * MINUTE_MS
+    }),
+    state: {},
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].title, 'Claude 5時間 リセットまで10分');
+});
+
 test('通知状態の変更を検出できる', () => {
   assert.equal(notificationStateChanged({}, { usage: {}, resets: {} }), false);
   assert.equal(notificationStateChanged({}, { usage: { 'claude:fivehour': { threshold: 80 } }, resets: {} }), true);
+});
+
+test('壊れた通知状態は空状態として扱う', () => {
+  const result = evaluateThresholdNotifications({
+    status: status({ used: 40 }),
+    state: {
+      usage: 'broken',
+      resets: ['broken']
+    },
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.usage, { 'claude:fivehour': { cycleID: String(baseNow + 180 * MINUTE_MS), threshold: null } });
 });
 
 console.log(`\n${passed} passed`);

@@ -5,10 +5,15 @@ const USAGE_THRESHOLDS = [80, 90, 95];
 const RESET_THRESHOLDS_MIN = [30, 10];
 const USAGE_RECOVERY_THRESHOLD = 75;
 
+function cloneStateBranch(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.assign({}, value);
+}
+
 function cloneState(state) {
   return {
-    usage: Object.assign({}, state && state.usage),
-    resets: Object.assign({}, state && state.resets)
+    usage: cloneStateBranch(state && state.usage),
+    resets: cloneStateBranch(state && state.resets)
   };
 }
 

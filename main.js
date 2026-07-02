@@ -178,8 +178,11 @@ function showThresholdNotifications(events) {
   });
 }
 
-function runThresholdNotifications() {
-  if (prefs.thresholdNotifications === false) return;
+function syncThresholdNotifications({ notify = true, forceSave = false } = {}) {
+  if (prefs.thresholdNotifications === false) {
+    if (forceSave) saveState();
+    return;
+  }
   const nowMs = Date.now();
   const previousState = notificationState;
   const result = evaluateThresholdNotifications({
@@ -189,10 +192,14 @@ function runThresholdNotifications() {
   });
 
   notificationState = result.state;
-  showThresholdNotifications(result.events);
-  if (notificationStateChanged(previousState, notificationState)) {
+  if (notify) showThresholdNotifications(result.events);
+  if (forceSave || notificationStateChanged(previousState, notificationState)) {
     saveState();
   }
+}
+
+function runThresholdNotifications() {
+  syncThresholdNotifications({ notify: true });
 }
 
 // --- スクレイピング ---
@@ -563,9 +570,12 @@ function buildTrayMenu() {
       checked: prefs.thresholdNotifications !== false,
       click: menuItem => {
         prefs.thresholdNotifications = menuItem.checked;
-        if (!menuItem.checked) notificationState = {};
-        saveState();
-        if (menuItem.checked) runThresholdNotifications();
+        if (menuItem.checked) {
+          syncThresholdNotifications({ notify: false, forceSave: true });
+        } else {
+          notificationState = {};
+          saveState();
+        }
       }
     },
     {
