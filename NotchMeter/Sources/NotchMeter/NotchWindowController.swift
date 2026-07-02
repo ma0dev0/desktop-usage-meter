@@ -2,6 +2,11 @@ import AppKit
 
 @MainActor
 final class NotchWindowController: NSObject {
+    private struct NotchLayout {
+        let centerX: CGFloat
+        let gapWidth: CGFloat
+    }
+
     private let mousePassthroughInterval: TimeInterval = 0.05
     private let panel: NSPanel
     private let meterView: NotchMeterView
@@ -98,18 +103,18 @@ final class NotchWindowController: NSObject {
         let frame = screen.frame
         let visibleFrame = screen.visibleFrame
         let menuBarHeight = max(24, min(44, frame.maxY - visibleFrame.maxY))
-        let notchGapWidth = notchGapWidth(for: screen, menuBarHeight: menuBarHeight)
+        let notchLayout = notchLayout(for: screen, menuBarHeight: menuBarHeight)
         let width = widthForMenuBar(
             screenWidth: frame.width,
             menuBarHeight: menuBarHeight,
-            notchGapWidth: notchGapWidth
+            notchGapWidth: notchLayout.gapWidth
         )
         let height = max(28, menuBarHeight)
-        let x = round(frame.midX - width / 2)
+        let x = panelX(centerX: notchLayout.centerX, width: width, screenFrame: frame)
         let y = round(frame.maxY - height)
 
         panel.setFrame(CGRect(x: x, y: y, width: width, height: height), display: true)
-        meterView.notchGapWidth = notchGapWidth
+        meterView.notchGapWidth = notchLayout.gapWidth
         meterView.frame = panel.contentView?.bounds ?? CGRect(x: 0, y: 0, width: width, height: height)
         meterView.needsDisplay = true
     }
@@ -134,17 +139,50 @@ final class NotchWindowController: NSObject {
         return rightArea.minX > leftArea.maxX
     }
 
-    private func notchGapWidth(for screen: NSScreen, menuBarHeight: CGFloat) -> CGFloat {
+    private func notchLayout(for screen: NSScreen, menuBarHeight: CGFloat) -> NotchLayout {
+        let frame = screen.frame
         let fallbackGap: CGFloat = menuBarHeight >= 32 ? 124 : 112
         guard let leftArea = screen.auxiliaryTopLeftArea,
               let rightArea = screen.auxiliaryTopRightArea,
               !leftArea.isEmpty,
               !rightArea.isEmpty else {
-            return fallbackGap
+            return NotchLayout(centerX: frame.midX, gapWidth: fallbackGap)
         }
 
         let measuredGap = rightArea.minX - leftArea.maxX
-        return max(fallbackGap, measuredGap + 12)
+        guard measuredGap > 0 else {
+            return NotchLayout(centerX: frame.midX, gapWidth: fallbackGap)
+        }
+
+        let measuredCenterX = (leftArea.maxX + rightArea.minX) / 2
+        return NotchLayout(
+            centerX: normalizedScreenX(measuredCenterX, in: frame),
+            gapWidth: max(fallbackGap, measuredGap + 12)
+        )
+    }
+
+    private func normalizedScreenX(_ x: CGFloat, in frame: CGRect) -> CGFloat {
+        if (frame.minX...frame.maxX).contains(x) {
+            return x
+        }
+
+        let relativeX = frame.minX + x
+        if (frame.minX...frame.maxX).contains(relativeX) {
+            return relativeX
+        }
+
+        return frame.midX
+    }
+
+    private func panelX(centerX: CGFloat, width: CGFloat, screenFrame: CGRect) -> CGFloat {
+        guard width < screenFrame.width else {
+            return round(screenFrame.minX)
+        }
+
+        let minX = screenFrame.minX
+        let maxX = screenFrame.maxX - width
+        let desiredX = centerX - width / 2
+        return round(min(max(desiredX, minX), maxX))
     }
 
     private func widthForMenuBar(screenWidth: CGFloat, menuBarHeight: CGFloat, notchGapWidth: CGFloat) -> CGFloat {

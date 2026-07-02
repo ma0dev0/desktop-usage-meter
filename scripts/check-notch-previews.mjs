@@ -9,6 +9,7 @@ const previews = [
   { path: '/tmp/notchmeter-single.png', transparent: true, leftContent: false, rightContent: true, leftBars: false, rightBars: true },
   { path: '/tmp/notchmeter-backdrop.png', transparent: false, leftBars: true, rightBars: true },
   { path: '/tmp/notchmeter-hover.png', transparent: false, leftBars: true, rightBars: true },
+  { path: '/tmp/notchmeter-hover-right.png', transparent: false, leftBars: true, rightBars: true },
   { path: '/tmp/notchmeter-empty.png', transparent: false, leftBars: false, rightBars: false },
   { path: '/tmp/notchmeter-off.png', transparent: false, leftBars: false, rightBars: false },
   { path: '/tmp/notchmeter-login-required.png', transparent: false, leftBars: false, rightBars: false },
@@ -220,6 +221,15 @@ for (const preview of previews) {
       count: countOpaquePixels(image, rightRegion),
       expected: preview.rightContent
     });
+    assertNotchAdjacentContent({
+      path: preview.path,
+      image,
+      safeGap,
+      leftRegion,
+      rightRegion,
+      leftExpected: preview.leftContent,
+      rightExpected: preview.rightContent
+    });
   }
 
   assertLimitBars({ preview, image });
@@ -230,7 +240,14 @@ for (const preview of previews) {
 assertHoverDelta({
   baseline: parsePng('/tmp/notchmeter-backdrop.png'),
   hover: parsePng('/tmp/notchmeter-hover.png'),
-  path: '/tmp/notchmeter-hover.png'
+  path: '/tmp/notchmeter-hover.png',
+  target: 'left'
+});
+assertHoverDelta({
+  baseline: parsePng('/tmp/notchmeter-backdrop.png'),
+  hover: parsePng('/tmp/notchmeter-hover-right.png'),
+  path: '/tmp/notchmeter-hover-right.png',
+  target: 'right'
 });
 
 function assertRegionContent({ path, name, count, expected }) {
@@ -241,6 +258,62 @@ function assertRegionContent({ path, name, count, expected }) {
   if (!expected && count > 50) {
     throw new Error(`${path}: unexpected ${name} content (${count} pixels)`);
   }
+}
+
+function assertNotchAdjacentContent({
+  path,
+  image,
+  safeGap,
+  leftRegion,
+  rightRegion,
+  leftExpected,
+  rightExpected
+}) {
+  const maxDistanceFromNotch = Math.round(image.width * 0.08);
+
+  if (leftExpected) {
+    const leftBounds = opaqueBounds(image, leftRegion);
+    const leftDistance = safeGap.x - (leftBounds.x + leftBounds.width);
+    if (leftDistance > maxDistanceFromNotch) {
+      throw new Error(`${path}: left content is too far from notch (${leftDistance}px)`);
+    }
+  }
+
+  if (rightExpected) {
+    const rightBounds = opaqueBounds(image, rightRegion);
+    const rightDistance = rightBounds.x - (safeGap.x + safeGap.width);
+    if (rightDistance > maxDistanceFromNotch) {
+      throw new Error(`${path}: right content is too far from notch (${rightDistance}px)`);
+    }
+  }
+}
+
+function opaqueBounds(image, region) {
+  let minX = region.x + region.width;
+  let minY = region.y + region.height;
+  let maxX = region.x - 1;
+  let maxY = region.y - 1;
+
+  for (let y = region.y; y < region.y + region.height; y++) {
+    for (let x = region.x; x < region.x + region.width; x++) {
+      if (alphaAt(image, x, y) <= 16) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    throw new Error('expected opaque content bounds, found none');
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1
+  };
 }
 
 function assertLimitBars({ preview, image }) {
@@ -296,7 +369,7 @@ function assertRegionBars({ path, name, count, expected }) {
   }
 }
 
-function assertHoverDelta({ baseline, hover, path }) {
+function assertHoverDelta({ baseline, hover, path, target }) {
   if (baseline.width !== hover.width || baseline.height !== hover.height) {
     throw new Error(`${path}: hover preview size differs from baseline`);
   }
@@ -316,11 +389,14 @@ function assertHoverDelta({ baseline, hover, path }) {
 
   const leftDelta = countChangedPixels(baseline, hover, leftRegion);
   const rightDelta = countChangedPixels(baseline, hover, rightRegion);
-  if (leftDelta < 800) {
-    throw new Error(`${path}: expected left hover highlight, found only ${leftDelta} changed pixels`);
+
+  const targetDelta = target === 'right' ? rightDelta : leftDelta;
+  const oppositeDelta = target === 'right' ? leftDelta : rightDelta;
+  if (targetDelta < 800) {
+    throw new Error(`${path}: expected ${target} hover highlight, found only ${targetDelta} changed pixels`);
   }
-  if (rightDelta > 160) {
-    throw new Error(`${path}: hover changed too much of the right capsule (${rightDelta} pixels)`);
+  if (oppositeDelta > 160) {
+    throw new Error(`${path}: hover changed too much of the opposite capsule (${oppositeDelta} pixels)`);
   }
 }
 

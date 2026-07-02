@@ -321,6 +321,7 @@ final class NotchMeterView: NSView {
         let textColor = percentTextColor(for: provider)
         let stale = NotchStatusFormatting.isStale(provider: provider, in: status)
         let limits = Array(NotchStatusFormatting.visibleLimits(for: provider).prefix(2))
+        let timerText = resetTimerText(for: provider, stale: stale)
 
         let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
         let attributes: [NSAttributedString.Key: Any] = [
@@ -345,20 +346,38 @@ final class NotchMeterView: NSView {
             + staleGap + staleIconSize
         let limitGroupGap: CGFloat = limits.isEmpty ? 0 : 12
         let limitGap: CGFloat = 7
+        let timerWidth = timerText.map { resetTimerWidth(for: $0) } ?? 0
+        let timerGap: CGFloat = timerText == nil ? 0 : 7
+        let timerSpace = timerWidth + timerGap
         let availableLimitWidth = max(
             0,
-            rect.width - headerWidth - limitGroupGap - CGFloat(max(0, limits.count - 1)) * limitGap
+            rect.width
+                - headerWidth
+                - limitGroupGap
+                - CGFloat(max(0, limits.count - 1)) * limitGap
+                - timerSpace
         )
         let limitWidth = limits.isEmpty ? 0 : floor(availableLimitWidth / CGFloat(limits.count))
-        let totalWidth = headerWidth
+        let contentWidth = headerWidth
             + limitGroupGap
             + CGFloat(limits.count) * limitWidth
             + CGFloat(max(0, limits.count - 1)) * limitGap
+        let totalWidth = contentWidth + timerSpace
         let startX = alignRight ? rect.maxX - totalWidth : rect.minX
+        let contentStartX = alignRight ? startX : startX + timerSpace
         let centerY = bounds.midY
 
+        if !alignRight, let timerText {
+            drawResetTimer(timerText, in: CGRect(
+                x: startX,
+                y: centerY - 7,
+                width: timerWidth,
+                height: 14
+            ))
+        }
+
         let iconRect = CGRect(
-            x: startX,
+            x: contentStartX,
             y: centerY - iconSize / 2,
             width: iconSize,
             height: iconSize
@@ -366,7 +385,7 @@ final class NotchMeterView: NSView {
         drawProviderIcon(provider, in: iconRect)
 
         let textPoint = CGPoint(
-            x: startX + iconSize + gap,
+            x: contentStartX + iconSize + gap,
             y: centerY - size.height / 2 + 0.5
         )
         percentText.draw(at: textPoint, withAttributes: attributes)
@@ -421,6 +440,15 @@ final class NotchMeterView: NSView {
             )
             drawLimit(limit, provider: provider, in: limitRect)
             limitX += limitWidth + limitGap
+        }
+
+        if alignRight, let timerText {
+            drawResetTimer(timerText, in: CGRect(
+                x: contentStartX + contentWidth + timerGap,
+                y: centerY - 7,
+                width: timerWidth,
+                height: 14
+            ))
         }
     }
 
@@ -572,6 +600,45 @@ final class NotchMeterView: NSView {
         }
     }
 
+    private func drawResetTimer(_ text: String, in rect: CGRect) {
+        let badge = NSBezierPath(
+            roundedRect: rect,
+            xRadius: rect.height / 2,
+            yRadius: rect.height / 2
+        )
+        hudYellow().withAlphaComponent(0.12).setFill()
+        badge.fill()
+
+        let border = NSBezierPath(
+            roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: (rect.height - 1) / 2,
+            yRadius: (rect.height - 1) / 2
+        )
+        border.lineWidth = 1
+        hudYellow().withAlphaComponent(0.28).setStroke()
+        border.stroke()
+
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .semibold)
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: hudYellow().withAlphaComponent(0.92),
+            .paragraphStyle: style,
+            .kern: 0
+        ]
+        let textSize = text.size(withAttributes: attributes)
+        text.draw(
+            in: CGRect(
+                x: rect.minX,
+                y: rect.midY - textSize.height / 2 + 0.3,
+                width: rect.width,
+                height: textSize.height
+            ),
+            withAttributes: attributes
+        )
+    }
+
     private func shortLimitName(_ key: String) -> String {
         key == "weekly" ? "週" : "5h"
     }
@@ -610,18 +677,84 @@ final class NotchMeterView: NSView {
         let visibleLimitCount = min(limits.count, 2)
         let limitGap: CGFloat = 7
         let targetLimitWidth: CGFloat = 68
+        let stale = NotchStatusFormatting.isStale(provider: provider, in: status)
+        let timerText = resetTimerText(for: provider, stale: stale)
+        let timerSpace = timerText.map { resetTimerWidth(for: $0) + 7 } ?? 0
         return ceil(
             providerHeaderWidth(provider)
                 + 12
                 + CGFloat(visibleLimitCount) * targetLimitWidth
                 + CGFloat(max(0, visibleLimitCount - 1)) * limitGap
+                + timerSpace
         )
+    }
+
+    private func resetTimerText(for provider: ProviderStatus, stale: Bool) -> String? {
+        guard !stale, provider.loggedIn != false else {
+            return nil
+        }
+        guard let limit = NotchStatusFormatting.visibleLimits(for: provider)
+            .first(where: { $0.key == "fivehour" }) else {
+            return nil
+        }
+        guard let minutes = resetMinutesRemaining(for: limit) else {
+            return nil
+        }
+        return String(format: "%02d", minutes)
+    }
+
+    private func resetMinutesRemaining(for limit: LimitStatus) -> Int? {
+        if let resetAt = limit.resetAt {
+            let seconds = resetAt.timeIntervalSince(Date())
+            if seconds > 0 && seconds < 60 * 60 {
+                return max(1, Int(seconds / 60))
+            }
+        }
+
+        return resetMinutesFromLabel(limit.resetLabel)
+            ?? resetMinutesFromLabel(limit.resetText)
+    }
+
+    private func resetMinutesFromLabel(_ label: String?) -> Int? {
+        guard let label else {
+            return nil
+        }
+        let patterns = [
+            #"あと\s*(\d{1,2})\s*分"#,
+            #"(\d{1,2})\s*分後"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                continue
+            }
+            let range = NSRange(label.startIndex..<label.endIndex, in: label)
+            guard let match = regex.firstMatch(in: label, range: range),
+                  match.numberOfRanges > 1,
+                  let minuteRange = Range(match.range(at: 1), in: label),
+                  let minutes = Int(label[minuteRange]),
+                  minutes > 0,
+                  minutes < 60 else {
+                continue
+            }
+            return minutes
+        }
+
+        return nil
+    }
+
+    private func resetTimerWidth(for text: String) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .semibold),
+            .kern: 0
+        ]
+        return max(17, ceil(text.size(withAttributes: attributes).width) + 6)
     }
 
     private func drawStaleIcon(in rect: CGRect) {
         let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 0.6, dy: 0.6))
         circle.lineWidth = 1.2
-        NSColor.systemYellow.setStroke()
+        hudYellow().setStroke()
         circle.stroke()
 
         let center = CGPoint(x: rect.midX, y: rect.midY)
@@ -632,14 +765,14 @@ final class NotchMeterView: NSView {
         hands.line(to: CGPoint(x: center.x, y: rect.minY + 2.2))
         hands.move(to: center)
         hands.line(to: CGPoint(x: rect.maxX - 2.2, y: center.y))
-        NSColor.systemYellow.setStroke()
+        hudYellow().setStroke()
         hands.stroke()
     }
 
     private func drawRefreshErrorIcon(in rect: CGRect) {
         let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 0.6, dy: 0.6))
         circle.lineWidth = 1.2
-        NSColor.systemRed.setStroke()
+        hudRed().setStroke()
         circle.stroke()
 
         let mark = NSBezierPath()
@@ -647,7 +780,7 @@ final class NotchMeterView: NSView {
         mark.lineCapStyle = .round
         mark.move(to: CGPoint(x: rect.midX, y: rect.minY + 2.2))
         mark.line(to: CGPoint(x: rect.midX, y: rect.maxY - 3.7))
-        NSColor.systemRed.setStroke()
+        hudRed().setStroke()
         mark.stroke()
 
         let dot = NSBezierPath(ovalIn: CGRect(
@@ -656,7 +789,7 @@ final class NotchMeterView: NSView {
             width: 1.6,
             height: 1.6
         ))
-        NSColor.systemRed.setFill()
+        hudRed().setFill()
         dot.fill()
     }
 
@@ -688,24 +821,24 @@ final class NotchMeterView: NSView {
     private func usageColor(for limit: LimitStatus, used: Int) -> NSColor {
         switch limit.pace?.kind {
         case "exhausted", "very-fast":
-            return NSColor.systemRed
+            return hudRed()
         case "fast":
-            return NSColor.systemOrange
+            return hudOrange()
         case "slightly-fast":
-            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
+            return hudYellow()
         case "steady", "relaxed", "pending":
-            return NSColor.systemGreen
+            return hudGreen()
         default:
             break
         }
 
         if used >= 90 {
-            return NSColor.systemRed
+            return hudRed()
         }
         if used >= 70 {
-            return NSColor.systemOrange
+            return hudOrange()
         }
-        return NSColor.systemGreen
+        return hudGreen()
     }
 
     private func providerIconColor(for provider: ProviderStatus) -> NSColor {
@@ -726,13 +859,13 @@ final class NotchMeterView: NSView {
             return NSColor.white.withAlphaComponent(0.9)
         }
         if remaining <= 10 {
-            return NSColor.systemRed
+            return hudRed()
         }
         if remaining <= 25 {
-            return NSColor.systemOrange
+            return hudOrange()
         }
         if remaining <= 40 {
-            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
+            return hudYellow()
         }
         return NSColor.white.withAlphaComponent(0.94)
     }
@@ -743,11 +876,11 @@ final class NotchMeterView: NSView {
     ) -> NSColor {
         switch urgency {
         case .critical:
-            return NSColor.systemRed
+            return hudRed()
         case .warning:
-            return NSColor.systemOrange
+            return hudOrange()
         case .caution:
-            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
+            return hudYellow()
         case .normal:
             return providerColor(provider.color)
         }
@@ -760,12 +893,28 @@ final class NotchMeterView: NSView {
         isRefreshing: Bool
     ) -> NSColor {
         if hasRefreshError {
-            return NSColor.systemRed
+            return hudRed()
         }
         if isRefreshing {
             return NSColor.systemBlue
         }
         return providerAccentColor(for: provider, urgency: urgency)
+    }
+
+    private func hudRed() -> NSColor {
+        NSColor(calibratedRed: 0.92, green: 0.30, blue: 0.32, alpha: 1)
+    }
+
+    private func hudOrange() -> NSColor {
+        NSColor(calibratedRed: 0.94, green: 0.52, blue: 0.25, alpha: 1)
+    }
+
+    private func hudYellow() -> NSColor {
+        NSColor(calibratedRed: 0.90, green: 0.70, blue: 0.26, alpha: 1)
+    }
+
+    private func hudGreen() -> NSColor {
+        NSColor(calibratedRed: 0.34, green: 0.76, blue: 0.34, alpha: 1)
     }
 
     private func providerColor(_ hex: String?) -> NSColor {

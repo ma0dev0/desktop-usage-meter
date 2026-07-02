@@ -8,6 +8,7 @@ const {
   BrowserWindow,
   Tray,
   Menu,
+  Notification,
   ipcMain,
   nativeImage,
   screen,
@@ -21,6 +22,10 @@ const { writeJsonAtomic } = require('./src/atomicFile');
 const { providers, isLoginUrl } = require('./src/providers');
 const { buildStatusSummary } = require('./src/statusSummary');
 const { buildNotchStatus } = require('./src/notchStatus');
+const {
+  evaluateThresholdNotifications,
+  notificationStateChanged
+} = require('./src/thresholdNotifications');
 const {
   appendLogText,
   buildLogHeader,
@@ -41,6 +46,7 @@ const DEFAULT_PREFS = {
   intervalMin: 5,
   weeklyPaceMode: 'calendar',
   providers: { claude: true, codex: true },
+  thresholdNotifications: true,
   autoLaunch: false,
   notchMeterAutoStart: false,
   meterBounds: null,
@@ -51,6 +57,7 @@ let prefs = Object.assign({}, DEFAULT_PREFS);
 let results = { claude: null, codex: null };
 let refreshErrors = {};
 let refreshingProviders = {};
+let notificationState = {};
 
 let tray = null;
 let meterWin = null;
@@ -75,16 +82,21 @@ function notchMeterLogFile() {
   return path.join(app.getPath('userData'), 'notchmeter.log');
 }
 
+function currentNotchStatus(nowMs = Date.now()) {
+  return buildNotchStatus({
+    providers,
+    results,
+    prefs,
+    nowMs,
+    refreshErrors,
+    refreshing,
+    refreshingProviders
+  });
+}
+
 function writeNotchStatus() {
   try {
-    writeJsonAtomic(notchStatusFile(), buildNotchStatus({
-      providers,
-      results,
-      prefs,
-      refreshErrors,
-      refreshing,
-      refreshingProviders
-    }));
+    writeJsonAtomic(notchStatusFile(), currentNotchStatus());
   } catch (e) {
     /* 表示用JSONの出力失敗は本体動作を止めない */
   }
@@ -96,6 +108,9 @@ function loadState() {
     if (data.prefs) prefs = Object.assign({}, DEFAULT_PREFS, data.prefs);
     if (data.prefs && data.prefs.providers) prefs.providers = Object.assign({ claude: true, codex: true }, data.prefs.providers);
     if (data.results) results = Object.assign({ claude: null, codex: null }, data.results);
+    if (data.notificationState && typeof data.notificationState === 'object') {
+      notificationState = data.notificationState;
+    }
   } catch (e) {
     /* 初回起動 */
   }
@@ -104,7 +119,7 @@ function loadState() {
 
 function saveState() {
   try {
-    writeJsonAtomic(stateFile(), { prefs, results });
+    writeJsonAtomic(stateFile(), { prefs, results, notificationState });
     writeNotchStatus();
   } catch (e) {
     /* 失敗は無視 */
@@ -117,6 +132,67 @@ function delay(ms) {
 
 function iconPath(size) {
   return path.join(__dirname, 'icons', 'icon' + size + '.png');
+}
+
+function notificationIcon() {
+  const img = nativeImage.createFromPath(iconPath(32));
+  return img.isEmpty() ? undefined : img;
+}
+
+function showNativeNotification(options) {
+  if (!Notification || !Notification.isSupported()) return;
+  const notification = new Notification(Object.assign({
+    silent: false,
+    icon: notificationIcon()
+  }, options));
+  notification.on('click', () => {
+    if (!meterWin || meterWin.isDestroyed()) {
+      createMeter();
+    } else {
+      meterWin.show();
+    }
+    prefs.meterVisible = true;
+    saveState();
+    updateTray();
+  });
+  notification.show();
+}
+
+function showThresholdNotifications(events) {
+  if (!events.length) return;
+  if (events.length === 1) {
+    showNativeNotification({
+      title: events[0].title,
+      body: events[0].body
+    });
+    return;
+  }
+
+  const visibleEvents = events.slice(0, 4);
+  const extraCount = events.length - visibleEvents.length;
+  const lines = visibleEvents.map(event => event.summary);
+  if (extraCount > 0) lines.push(`ほか ${extraCount} 件`);
+  showNativeNotification({
+    title: `Usage Meter: 注意が ${events.length} 件あります`,
+    body: lines.join('\n')
+  });
+}
+
+function runThresholdNotifications() {
+  if (prefs.thresholdNotifications === false) return;
+  const nowMs = Date.now();
+  const previousState = notificationState;
+  const result = evaluateThresholdNotifications({
+    status: currentNotchStatus(nowMs),
+    state: previousState,
+    nowMs
+  });
+
+  notificationState = result.state;
+  showThresholdNotifications(result.events);
+  if (notificationStateChanged(previousState, notificationState)) {
+    saveState();
+  }
 }
 
 // --- スクレイピング ---
@@ -204,6 +280,7 @@ async function refreshAll(reason) {
     refreshing = false;
     refreshingProviders = {};
     saveState();
+    runThresholdNotifications();
   } finally {
     refreshing = false;
     refreshingProviders = {};
@@ -481,6 +558,17 @@ function buildTrayMenu() {
       }))
     },
     {
+      label: 'しきい値通知',
+      type: 'checkbox',
+      checked: prefs.thresholdNotifications !== false,
+      click: menuItem => {
+        prefs.thresholdNotifications = menuItem.checked;
+        if (!menuItem.checked) notificationState = {};
+        saveState();
+        if (menuItem.checked) runThresholdNotifications();
+      }
+    },
+    {
       label: '週間ペースの計算',
       submenu: [
         weeklyPaceItem('7日間（土日を含む）', 'calendar'),
@@ -682,13 +770,18 @@ function startTimer() {
 
 function startDisplayRefreshTimer() {
   if (displayRefreshTimer) clearInterval(displayRefreshTimer);
-  displayRefreshTimer = setInterval(updateTrayTooltip, DISPLAY_REFRESH_MS);
+  displayRefreshTimer = setInterval(refreshDisplayState, DISPLAY_REFRESH_MS);
 }
 
 function stopDisplayRefreshTimer() {
   if (!displayRefreshTimer) return;
   clearInterval(displayRefreshTimer);
   displayRefreshTimer = null;
+}
+
+function refreshDisplayState() {
+  updateTrayTooltip();
+  runThresholdNotifications();
 }
 
 function applyAutoLaunch() {
