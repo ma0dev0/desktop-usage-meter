@@ -140,39 +140,43 @@ function notificationIcon() {
 }
 
 function showNativeNotification(options) {
-  if (!Notification || !Notification.isSupported()) return;
-  const notification = new Notification(Object.assign({
-    silent: false,
-    icon: notificationIcon()
-  }, options));
-  notification.on('click', () => {
-    if (!meterWin || meterWin.isDestroyed()) {
-      createMeter();
-    } else {
-      meterWin.show();
-    }
-    prefs.meterVisible = true;
-    saveState();
-    updateTray();
-  });
-  notification.show();
+  if (!Notification || !Notification.isSupported()) return false;
+  try {
+    const notification = new Notification(Object.assign({
+      silent: false,
+      icon: notificationIcon()
+    }, options));
+    notification.on('click', () => {
+      if (!meterWin || meterWin.isDestroyed()) {
+        createMeter();
+      } else {
+        meterWin.show();
+      }
+      prefs.meterVisible = true;
+      saveState();
+      updateTray();
+    });
+    notification.show();
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function showThresholdNotifications(events) {
-  if (!events.length) return;
+  if (!events.length) return true;
   if (events.length === 1) {
-    showNativeNotification({
+    return showNativeNotification({
       title: events[0].title,
       body: events[0].body
     });
-    return;
   }
 
   const visibleEvents = events.slice(0, 4);
   const extraCount = events.length - visibleEvents.length;
   const lines = visibleEvents.map(event => event.summary);
   if (extraCount > 0) lines.push(`ほか ${extraCount} 件`);
-  showNativeNotification({
+  return showNativeNotification({
     title: `Usage Meter: 注意が ${events.length} 件あります`,
     body: lines.join('\n')
   });
@@ -191,8 +195,10 @@ function syncThresholdNotifications({ notify = true, forceSave = false } = {}) {
     nowMs
   });
 
+  const delivered = !notify || showThresholdNotifications(result.events);
+  if (!delivered) return;
+
   notificationState = result.state;
-  if (notify) showThresholdNotifications(result.events);
   if (forceSave || notificationStateChanged(previousState, notificationState)) {
     saveState();
   }
