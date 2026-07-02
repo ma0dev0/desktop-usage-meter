@@ -4,11 +4,19 @@ const MINUTE_MS = 60 * 1000;
 const USAGE_THRESHOLDS = [80, 90, 95];
 const RESET_THRESHOLDS_MIN = [30, 10];
 const USAGE_RECOVERY_THRESHOLD = 75;
+const STALE_NOTIFICATION_AFTER_MS = 30 * MINUTE_MS;
+const REFRESH_ERROR_WITHOUT_VALUE_AFTER_MS = STALE_AFTER_MS;
+
+function cloneStateBranch(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.assign({}, value);
+}
 
 function cloneState(state) {
   return {
-    usage: Object.assign({}, state && state.usage),
-    resets: Object.assign({}, state && state.resets)
+    usage: cloneStateBranch(state && state.usage),
+    resets: cloneStateBranch(state && state.resets),
+    health: cloneStateBranch(state && state.health)
   };
 }
 
@@ -59,6 +67,11 @@ function providerIsFresh(provider, nowMs) {
   return nowMs - capturedAt < STALE_AFTER_MS;
 }
 
+function providerAgeMs(provider, nowMs) {
+  const capturedAt = toTimeMs(provider && provider.capturedAt);
+  return capturedAt == null ? null : nowMs - capturedAt;
+}
+
 function shouldEvaluateProvider(provider) {
   return Boolean(
     provider &&
@@ -66,6 +79,15 @@ function shouldEvaluateProvider(provider) {
     provider.visible !== false &&
     provider.loggedIn !== false &&
     !provider.refreshError
+  );
+}
+
+function shouldEvaluateProviderHealth(provider) {
+  return Boolean(
+    provider &&
+    provider.enabled !== false &&
+    provider.visible !== false &&
+    provider.loggedIn !== false
   );
 }
 
@@ -104,6 +126,87 @@ function resetEvent({ provider, limit, threshold, minutesRemaining }) {
     title: `${provider.name} ${label} リセットまで${minutesRemaining}分`,
     body: `5時間制限のリセットが近づいています${reset}`,
     summary: `${provider.name} ${label}: リセットまで${minutesRemaining}分`
+  };
+}
+
+function refreshErrorInfo(provider) {
+  if (!provider || !provider.refreshError) return null;
+  const error = provider.refreshError;
+  if (typeof error === 'string') {
+    return { code: error, label: '取得失敗', note: '取得失敗' };
+  }
+  return {
+    code: error.code || 'UNKNOWN',
+    label: error.label || '取得失敗',
+    note: error.note || error.label || '取得失敗'
+  };
+}
+
+function providerHealthIssue(provider, nowMs) {
+  if (!shouldEvaluateProviderHealth(provider)) return null;
+
+  const error = refreshErrorInfo(provider);
+  if (error) {
+    const ageMs = providerAgeMs(provider, nowMs);
+    if (ageMs != null && ageMs < STALE_AFTER_MS) return null;
+    const issueID = `refresh-error:${error.code}`;
+    return {
+      issueID,
+      delayMs: ageMs == null ? REFRESH_ERROR_WITHOUT_VALUE_AFTER_MS : 0,
+      event: {
+        kind: 'health',
+        level: 'warning',
+        rank: 37,
+        title: `${provider.name} の取得に失敗しています`,
+        body: error.note,
+        summary: `${provider.name}: ${error.label}`
+      }
+    };
+  }
+
+  const ageMs = providerAgeMs(provider, nowMs);
+  if (ageMs != null && ageMs >= STALE_NOTIFICATION_AFTER_MS) {
+    const minutes = Math.floor(ageMs / MINUTE_MS);
+    return {
+      issueID: 'stale',
+      delayMs: 0,
+      event: {
+        kind: 'health',
+        level: 'notice',
+        rank: 20,
+        title: `${provider.name} のデータが古くなっています`,
+        body: `前回更新から${minutes}分経過しています`,
+        summary: `${provider.name}: ${minutes}分前のデータ`
+      }
+    };
+  }
+
+  return null;
+}
+
+function evaluateProviderHealth({ provider, key, state, events, nowMs }) {
+  const issue = providerHealthIssue(provider, nowMs);
+  if (!issue) {
+    delete state.health[key];
+    return;
+  }
+
+  const previous = state.health[key] || {};
+  const sameIssue = previous.issueID === issue.issueID;
+  const firstSeenAt = sameIssue && Number.isFinite(previous.firstSeenAt)
+    ? previous.firstSeenAt
+    : nowMs;
+  const delayMs = Number.isFinite(issue.delayMs) ? issue.delayMs : 0;
+  const ready = nowMs - firstSeenAt >= delayMs;
+  const notified = sameIssue && previous.notified === true;
+
+  if (ready && !notified) {
+    events.push(issue.event);
+  }
+  state.health[key] = {
+    issueID: issue.issueID,
+    firstSeenAt,
+    notified: notified || ready
   };
 }
 
@@ -188,9 +291,16 @@ function evaluateThresholdNotifications({
   const events = [];
   const activeUsageKeys = new Set();
   const activeResetKeys = new Set();
+  const activeHealthKeys = new Set();
   const providers = status && Array.isArray(status.providers) ? status.providers : [];
 
   for (const provider of providers) {
+    if (shouldEvaluateProviderHealth(provider)) {
+      const key = `${provider.id}:health`;
+      activeHealthKeys.add(key);
+      evaluateProviderHealth({ provider, key, state: nextState, events, nowMs });
+    }
+
     if (!shouldEvaluateProvider(provider)) continue;
     const fresh = providerIsFresh(provider, nowMs);
     const limits = Array.isArray(provider.limits) ? provider.limits : [];
@@ -212,6 +322,7 @@ function evaluateThresholdNotifications({
 
   pruneStateBranch(nextState.usage, activeUsageKeys);
   pruneStateBranch(nextState.resets, activeResetKeys);
+  pruneStateBranch(nextState.health, activeHealthKeys);
 
   events.sort((a, b) => b.rank - a.rank);
   return { events, state: nextState };
@@ -223,6 +334,8 @@ function notificationStateChanged(a, b) {
 
 module.exports = {
   RESET_THRESHOLDS_MIN,
+  REFRESH_ERROR_WITHOUT_VALUE_AFTER_MS,
+  STALE_NOTIFICATION_AFTER_MS,
   USAGE_THRESHOLDS,
   evaluateThresholdNotifications,
   notificationStateChanged

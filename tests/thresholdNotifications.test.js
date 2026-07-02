@@ -54,18 +54,20 @@ function status({
     });
   }
 
+  const provider = {
+    id: 'claude',
+    name: 'Claude',
+    enabled: true,
+    visible: true,
+    loggedIn: true,
+    refreshError,
+    limits
+  };
+  if (capturedAt !== null) provider.capturedAt = iso(capturedAt);
+
   return {
     providers: [
-      {
-        id: 'claude',
-        name: 'Claude',
-        enabled: true,
-        visible: true,
-        loggedIn: true,
-        capturedAt: iso(capturedAt),
-        refreshError,
-        limits
-      }
+      provider
     ]
   };
 }
@@ -158,12 +160,207 @@ test('取得エラー中のプロバイダーは通知しない', () => {
   });
 
   assert.equal(result.events.length, 0);
-  assert.deepEqual(result.state, { usage: {}, resets: {} });
+  assert.deepEqual(result.state, { usage: {}, resets: {}, health: {} });
+});
+
+test('取得失敗が古い前回値まで続いたら一度だけ通知する', () => {
+  let result = evaluateThresholdNotifications({
+    status: status({
+      refreshError: {
+        code: 'LOAD_FAILED',
+        label: '読み込み失敗',
+        note: '読み込み失敗 · 前回値を表示'
+      },
+      capturedAt: baseNow - 16 * MINUTE_MS
+    }),
+    state: {},
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].title, 'Claude の取得に失敗しています');
+  assert.equal(result.events[0].body, '読み込み失敗 · 前回値を表示');
+
+  result = evaluateThresholdNotifications({
+    status: status({
+      nowMs: baseNow + MINUTE_MS,
+      refreshError: {
+        code: 'LOAD_FAILED',
+        label: '読み込み失敗',
+        note: '読み込み失敗 · 前回値を表示'
+      },
+      capturedAt: baseNow - 16 * MINUTE_MS
+    }),
+    state: result.state,
+    nowMs: baseNow + MINUTE_MS
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'refresh-error:LOAD_FAILED',
+      firstSeenAt: baseNow,
+      notified: true
+    }
+  });
+});
+
+test('前回値がない取得失敗は15分続いてから通知する', () => {
+  let result = evaluateThresholdNotifications({
+    status: status({
+      refreshError: {
+        code: 'LOAD_FAILED',
+        label: '読み込み失敗',
+        note: '読み込み失敗'
+      },
+      capturedAt: null
+    }),
+    state: {},
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'refresh-error:LOAD_FAILED',
+      firstSeenAt: baseNow,
+      notified: false
+    }
+  });
+
+  result = evaluateThresholdNotifications({
+    status: status({
+      refreshError: {
+        code: 'LOAD_FAILED',
+        label: '読み込み失敗',
+        note: '読み込み失敗'
+      },
+      capturedAt: null
+    }),
+    state: result.state,
+    nowMs: baseNow + 15 * MINUTE_MS
+  });
+
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].title, 'Claude の取得に失敗しています');
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'refresh-error:LOAD_FAILED',
+      firstSeenAt: baseNow,
+      notified: true
+    }
+  });
+});
+
+test('取得が復旧したらヘルス通知状態をリセットする', () => {
+  const result = evaluateThresholdNotifications({
+    status: status({ used: 40 }),
+    state: {
+      usage: {},
+      resets: {},
+      health: {
+        'claude:health': {
+          issueID: 'refresh-error:LOAD_FAILED',
+          firstSeenAt: baseNow - 15 * MINUTE_MS,
+          notified: true
+        }
+      }
+    },
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.health, {});
+});
+
+test('古い使用量では使用率通知を出さず通知済み状態を保持する', () => {
+  const existingState = {
+    usage: {
+      'claude:fivehour': {
+        cycleID: String(baseNow + 180 * MINUTE_MS),
+        threshold: 90
+      }
+    },
+    resets: {}
+  };
+  const result = evaluateThresholdNotifications({
+    status: status({
+      used: 96,
+      capturedAt: baseNow - 20 * MINUTE_MS
+    }),
+    state: existingState,
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.usage, existingState.usage);
+});
+
+test('30分以上古いデータは一度だけ通知する', () => {
+  let result = evaluateThresholdNotifications({
+    status: status({
+      capturedAt: baseNow - 30 * MINUTE_MS
+    }),
+    state: {},
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].title, 'Claude のデータが古くなっています');
+  assert.equal(result.events[0].body, '前回更新から30分経過しています');
+
+  result = evaluateThresholdNotifications({
+    status: status({
+      nowMs: baseNow + 30 * MINUTE_MS,
+      capturedAt: baseNow - 30 * MINUTE_MS
+    }),
+    state: result.state,
+    nowMs: baseNow + 30 * MINUTE_MS
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'stale',
+      firstSeenAt: baseNow,
+      notified: true
+    }
+  });
+});
+
+test('古いデータでも確定済みの5時間リセット時刻が近ければ通知する', () => {
+  const result = evaluateThresholdNotifications({
+    status: status({
+      used: 40,
+      resetInMin: 10,
+      capturedAt: baseNow - 20 * MINUTE_MS
+    }),
+    state: {},
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].title, 'Claude 5時間 リセットまで10分');
 });
 
 test('通知状態の変更を検出できる', () => {
   assert.equal(notificationStateChanged({}, { usage: {}, resets: {} }), false);
   assert.equal(notificationStateChanged({}, { usage: { 'claude:fivehour': { threshold: 80 } }, resets: {} }), true);
+  assert.equal(notificationStateChanged({}, { usage: {}, resets: {}, health: { 'claude:health': { issueID: 'stale' } } }), true);
+});
+
+test('壊れた通知状態は空状態として扱う', () => {
+  const result = evaluateThresholdNotifications({
+    status: status({ used: 40 }),
+    state: {
+      usage: 'broken',
+      resets: ['broken']
+    },
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.usage, { 'claude:fivehour': { cycleID: String(baseNow + 180 * MINUTE_MS), threshold: null } });
 });
 
 console.log(`\n${passed} passed`);
