@@ -25,4 +25,19 @@ test('配布名とリポジトリ情報を持つ', () => {
   assert.match(pkg.repository.url, /^https:\/\/github\.com\/ma0dev0\/desktop-usage-meter\.git$/);
 });
 
+test('macOS配布設定がユーティリティアプリとして整っている', () => {
+  assert.equal(pkg.build.mac.category, 'public.app-category.utilities');
+  assert.equal(pkg.build.mac.target, 'dmg');
+  assert.equal(pkg.build.mac.icon, 'icons/icon1024.png');
+});
+
+test('配布版にNotchMeter実行ファイルを同梱する', () => {
+  assert.deepEqual(pkg.build.mac.extraResources, [
+    {
+      from: 'NotchMeter/.build/release/NotchMeter',
+      to: 'NotchMeter/NotchMeter'
+    }
+  ]);
+});
+
 console.log(`\n${passed} passed`);
