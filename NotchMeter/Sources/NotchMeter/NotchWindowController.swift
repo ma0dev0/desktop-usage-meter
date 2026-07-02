@@ -110,7 +110,7 @@ final class NotchWindowController: NSObject {
             notchGapWidth: notchLayout.gapWidth
         )
         let height = max(28, menuBarHeight)
-        let x = round(notchLayout.centerX - width / 2)
+        let x = panelX(centerX: notchLayout.centerX, width: width, screenFrame: frame)
         let y = round(frame.maxY - height)
 
         panel.setFrame(CGRect(x: x, y: y, width: width, height: height), display: true)
@@ -172,6 +172,17 @@ final class NotchWindowController: NSObject {
         }
 
         return frame.midX
+    }
+
+    private func panelX(centerX: CGFloat, width: CGFloat, screenFrame: CGRect) -> CGFloat {
+        guard width < screenFrame.width else {
+            return round(screenFrame.minX)
+        }
+
+        let minX = screenFrame.minX
+        let maxX = screenFrame.maxX - width
+        let desiredX = centerX - width / 2
+        return round(min(max(desiredX, minX), maxX))
     }
 
     private func widthForMenuBar(screenWidth: CGFloat, menuBarHeight: CGFloat, notchGapWidth: CGFloat) -> CGFloat {

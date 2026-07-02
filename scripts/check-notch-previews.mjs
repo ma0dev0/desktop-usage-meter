@@ -9,6 +9,7 @@ const previews = [
   { path: '/tmp/notchmeter-single.png', transparent: true, leftContent: false, rightContent: true, leftBars: false, rightBars: true },
   { path: '/tmp/notchmeter-backdrop.png', transparent: false, leftBars: true, rightBars: true },
   { path: '/tmp/notchmeter-hover.png', transparent: false, leftBars: true, rightBars: true },
+  { path: '/tmp/notchmeter-hover-right.png', transparent: false, leftBars: true, rightBars: true },
   { path: '/tmp/notchmeter-empty.png', transparent: false, leftBars: false, rightBars: false },
   { path: '/tmp/notchmeter-off.png', transparent: false, leftBars: false, rightBars: false },
   { path: '/tmp/notchmeter-login-required.png', transparent: false, leftBars: false, rightBars: false },
@@ -239,7 +240,14 @@ for (const preview of previews) {
 assertHoverDelta({
   baseline: parsePng('/tmp/notchmeter-backdrop.png'),
   hover: parsePng('/tmp/notchmeter-hover.png'),
-  path: '/tmp/notchmeter-hover.png'
+  path: '/tmp/notchmeter-hover.png',
+  target: 'left'
+});
+assertHoverDelta({
+  baseline: parsePng('/tmp/notchmeter-backdrop.png'),
+  hover: parsePng('/tmp/notchmeter-hover-right.png'),
+  path: '/tmp/notchmeter-hover-right.png',
+  target: 'right'
 });
 
 function assertRegionContent({ path, name, count, expected }) {
@@ -361,7 +369,7 @@ function assertRegionBars({ path, name, count, expected }) {
   }
 }
 
-function assertHoverDelta({ baseline, hover, path }) {
+function assertHoverDelta({ baseline, hover, path, target }) {
   if (baseline.width !== hover.width || baseline.height !== hover.height) {
     throw new Error(`${path}: hover preview size differs from baseline`);
   }
@@ -381,11 +389,14 @@ function assertHoverDelta({ baseline, hover, path }) {
 
   const leftDelta = countChangedPixels(baseline, hover, leftRegion);
   const rightDelta = countChangedPixels(baseline, hover, rightRegion);
-  if (leftDelta < 800) {
-    throw new Error(`${path}: expected left hover highlight, found only ${leftDelta} changed pixels`);
+
+  const targetDelta = target === 'right' ? rightDelta : leftDelta;
+  const oppositeDelta = target === 'right' ? leftDelta : rightDelta;
+  if (targetDelta < 800) {
+    throw new Error(`${path}: expected ${target} hover highlight, found only ${targetDelta} changed pixels`);
   }
-  if (rightDelta > 160) {
-    throw new Error(`${path}: hover changed too much of the right capsule (${rightDelta} pixels)`);
+  if (oppositeDelta > 160) {
+    throw new Error(`${path}: hover changed too much of the opposite capsule (${oppositeDelta} pixels)`);
   }
 }
 

@@ -621,7 +621,7 @@ final class NotchMeterView: NSView {
     private func drawStaleIcon(in rect: CGRect) {
         let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 0.6, dy: 0.6))
         circle.lineWidth = 1.2
-        NSColor.systemYellow.setStroke()
+        hudYellow().setStroke()
         circle.stroke()
 
         let center = CGPoint(x: rect.midX, y: rect.midY)
@@ -632,14 +632,14 @@ final class NotchMeterView: NSView {
         hands.line(to: CGPoint(x: center.x, y: rect.minY + 2.2))
         hands.move(to: center)
         hands.line(to: CGPoint(x: rect.maxX - 2.2, y: center.y))
-        NSColor.systemYellow.setStroke()
+        hudYellow().setStroke()
         hands.stroke()
     }
 
     private func drawRefreshErrorIcon(in rect: CGRect) {
         let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 0.6, dy: 0.6))
         circle.lineWidth = 1.2
-        NSColor.systemRed.setStroke()
+        hudRed().setStroke()
         circle.stroke()
 
         let mark = NSBezierPath()
@@ -647,7 +647,7 @@ final class NotchMeterView: NSView {
         mark.lineCapStyle = .round
         mark.move(to: CGPoint(x: rect.midX, y: rect.minY + 2.2))
         mark.line(to: CGPoint(x: rect.midX, y: rect.maxY - 3.7))
-        NSColor.systemRed.setStroke()
+        hudRed().setStroke()
         mark.stroke()
 
         let dot = NSBezierPath(ovalIn: CGRect(
@@ -656,7 +656,7 @@ final class NotchMeterView: NSView {
             width: 1.6,
             height: 1.6
         ))
-        NSColor.systemRed.setFill()
+        hudRed().setFill()
         dot.fill()
     }
 
@@ -688,24 +688,24 @@ final class NotchMeterView: NSView {
     private func usageColor(for limit: LimitStatus, used: Int) -> NSColor {
         switch limit.pace?.kind {
         case "exhausted", "very-fast":
-            return NSColor.systemRed
+            return hudRed()
         case "fast":
-            return NSColor.systemOrange
+            return hudOrange()
         case "slightly-fast":
-            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
+            return hudYellow()
         case "steady", "relaxed", "pending":
-            return NSColor.systemGreen
+            return hudGreen()
         default:
             break
         }
 
         if used >= 90 {
-            return NSColor.systemRed
+            return hudRed()
         }
         if used >= 70 {
-            return NSColor.systemOrange
+            return hudOrange()
         }
-        return NSColor.systemGreen
+        return hudGreen()
     }
 
     private func providerIconColor(for provider: ProviderStatus) -> NSColor {
@@ -726,13 +726,13 @@ final class NotchMeterView: NSView {
             return NSColor.white.withAlphaComponent(0.9)
         }
         if remaining <= 10 {
-            return NSColor.systemRed
+            return hudRed()
         }
         if remaining <= 25 {
-            return NSColor.systemOrange
+            return hudOrange()
         }
         if remaining <= 40 {
-            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
+            return hudYellow()
         }
         return NSColor.white.withAlphaComponent(0.94)
     }
@@ -743,11 +743,11 @@ final class NotchMeterView: NSView {
     ) -> NSColor {
         switch urgency {
         case .critical:
-            return NSColor.systemRed
+            return hudRed()
         case .warning:
-            return NSColor.systemOrange
+            return hudOrange()
         case .caution:
-            return NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.18, alpha: 1)
+            return hudYellow()
         case .normal:
             return providerColor(provider.color)
         }
@@ -760,12 +760,28 @@ final class NotchMeterView: NSView {
         isRefreshing: Bool
     ) -> NSColor {
         if hasRefreshError {
-            return NSColor.systemRed
+            return hudRed()
         }
         if isRefreshing {
             return NSColor.systemBlue
         }
         return providerAccentColor(for: provider, urgency: urgency)
+    }
+
+    private func hudRed() -> NSColor {
+        NSColor(calibratedRed: 0.92, green: 0.30, blue: 0.32, alpha: 1)
+    }
+
+    private func hudOrange() -> NSColor {
+        NSColor(calibratedRed: 0.94, green: 0.52, blue: 0.25, alpha: 1)
+    }
+
+    private func hudYellow() -> NSColor {
+        NSColor(calibratedRed: 0.90, green: 0.70, blue: 0.26, alpha: 1)
+    }
+
+    private func hudGreen() -> NSColor {
+        NSColor(calibratedRed: 0.34, green: 0.76, blue: 0.34, alpha: 1)
     }
 
     private func providerColor(_ hex: String?) -> NSColor {
