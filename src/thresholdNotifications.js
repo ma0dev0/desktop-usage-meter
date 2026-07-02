@@ -5,6 +5,7 @@ const USAGE_THRESHOLDS = [80, 90, 95];
 const RESET_THRESHOLDS_MIN = [30, 10];
 const USAGE_RECOVERY_THRESHOLD = 75;
 const STALE_NOTIFICATION_AFTER_MS = 30 * MINUTE_MS;
+const REFRESH_ERROR_WITHOUT_VALUE_AFTER_MS = STALE_AFTER_MS;
 
 function cloneStateBranch(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -148,8 +149,10 @@ function providerHealthIssue(provider, nowMs) {
   if (error) {
     const ageMs = providerAgeMs(provider, nowMs);
     if (ageMs != null && ageMs < STALE_AFTER_MS) return null;
+    const issueID = `refresh-error:${error.code}`;
     return {
-      issueID: `refresh-error:${error.code}`,
+      issueID,
+      delayMs: ageMs == null ? REFRESH_ERROR_WITHOUT_VALUE_AFTER_MS : 0,
       event: {
         kind: 'health',
         level: 'warning',
@@ -166,6 +169,7 @@ function providerHealthIssue(provider, nowMs) {
     const minutes = Math.floor(ageMs / MINUTE_MS);
     return {
       issueID: 'stale',
+      delayMs: 0,
       event: {
         kind: 'health',
         level: 'notice',
@@ -188,10 +192,22 @@ function evaluateProviderHealth({ provider, key, state, events, nowMs }) {
   }
 
   const previous = state.health[key] || {};
-  if (previous.issueID !== issue.issueID) {
+  const sameIssue = previous.issueID === issue.issueID;
+  const firstSeenAt = sameIssue && Number.isFinite(previous.firstSeenAt)
+    ? previous.firstSeenAt
+    : nowMs;
+  const delayMs = Number.isFinite(issue.delayMs) ? issue.delayMs : 0;
+  const ready = nowMs - firstSeenAt >= delayMs;
+  const notified = sameIssue && previous.notified === true;
+
+  if (ready && !notified) {
     events.push(issue.event);
   }
-  state.health[key] = { issueID: issue.issueID };
+  state.health[key] = {
+    issueID: issue.issueID,
+    firstSeenAt,
+    notified: notified || ready
+  };
 }
 
 function evaluateUsageLimit({ provider, limit, key, state, events }) {
@@ -318,6 +334,7 @@ function notificationStateChanged(a, b) {
 
 module.exports = {
   RESET_THRESHOLDS_MIN,
+  REFRESH_ERROR_WITHOUT_VALUE_AFTER_MS,
   STALE_NOTIFICATION_AFTER_MS,
   USAGE_THRESHOLDS,
   evaluateThresholdNotifications,

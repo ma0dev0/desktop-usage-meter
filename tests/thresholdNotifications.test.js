@@ -54,18 +54,20 @@ function status({
     });
   }
 
+  const provider = {
+    id: 'claude',
+    name: 'Claude',
+    enabled: true,
+    visible: true,
+    loggedIn: true,
+    refreshError,
+    limits
+  };
+  if (capturedAt !== null) provider.capturedAt = iso(capturedAt);
+
   return {
     providers: [
-      {
-        id: 'claude',
-        name: 'Claude',
-        enabled: true,
-        visible: true,
-        loggedIn: true,
-        capturedAt: iso(capturedAt),
-        refreshError,
-        limits
-      }
+      provider
     ]
   };
 }
@@ -194,7 +196,60 @@ test('取得失敗が古い前回値まで続いたら一度だけ通知する',
   });
 
   assert.equal(result.events.length, 0);
-  assert.deepEqual(result.state.health, { 'claude:health': { issueID: 'refresh-error:LOAD_FAILED' } });
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'refresh-error:LOAD_FAILED',
+      firstSeenAt: baseNow,
+      notified: true
+    }
+  });
+});
+
+test('前回値がない取得失敗は15分続いてから通知する', () => {
+  let result = evaluateThresholdNotifications({
+    status: status({
+      refreshError: {
+        code: 'LOAD_FAILED',
+        label: '読み込み失敗',
+        note: '読み込み失敗'
+      },
+      capturedAt: null
+    }),
+    state: {},
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'refresh-error:LOAD_FAILED',
+      firstSeenAt: baseNow,
+      notified: false
+    }
+  });
+
+  result = evaluateThresholdNotifications({
+    status: status({
+      refreshError: {
+        code: 'LOAD_FAILED',
+        label: '読み込み失敗',
+        note: '読み込み失敗'
+      },
+      capturedAt: null
+    }),
+    state: result.state,
+    nowMs: baseNow + 15 * MINUTE_MS
+  });
+
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].title, 'Claude の取得に失敗しています');
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'refresh-error:LOAD_FAILED',
+      firstSeenAt: baseNow,
+      notified: true
+    }
+  });
 });
 
 test('取得が復旧したらヘルス通知状態をリセットする', () => {
@@ -203,7 +258,13 @@ test('取得が復旧したらヘルス通知状態をリセットする', () =>
     state: {
       usage: {},
       resets: {},
-      health: { 'claude:health': { issueID: 'refresh-error:LOAD_FAILED' } }
+      health: {
+        'claude:health': {
+          issueID: 'refresh-error:LOAD_FAILED',
+          firstSeenAt: baseNow - 15 * MINUTE_MS,
+          notified: true
+        }
+      }
     },
     nowMs: baseNow
   });
@@ -258,7 +319,13 @@ test('30分以上古いデータは一度だけ通知する', () => {
   });
 
   assert.equal(result.events.length, 0);
-  assert.deepEqual(result.state.health, { 'claude:health': { issueID: 'stale' } });
+  assert.deepEqual(result.state.health, {
+    'claude:health': {
+      issueID: 'stale',
+      firstSeenAt: baseNow,
+      notified: true
+    }
+  });
 });
 
 test('古いデータでも確定済みの5時間リセット時刻が近ければ通知する', () => {
