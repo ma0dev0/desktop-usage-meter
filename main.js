@@ -25,6 +25,12 @@ const { normalizeMeterBounds } = require('./src/windowBounds');
 const { providers, isLoginUrl } = require('./src/providers');
 const { buildStatusSummary } = require('./src/statusSummary');
 const { buildNotchStatus } = require('./src/notchStatus');
+const { buildWearPayload } = require('./src/wearPayload');
+const {
+  envWearSyncConfig,
+  normalizeWearSyncConfig,
+  postWearPayload
+} = require('./src/wearSync');
 const {
   evaluateThresholdNotifications,
   notificationStateChanged
@@ -52,6 +58,13 @@ let refreshErrors = {};
 let refreshingProviders = {};
 let notificationState = {};
 let notificationDeliveryState = {};
+let wearSyncState = {
+  lastAttemptAt: null,
+  lastSyncedAt: null,
+  lastError: null,
+  lastSkipped: null
+};
+let wearSyncInFlight = false;
 
 let tray = null;
 let meterWin = null;
@@ -72,6 +85,14 @@ function notchStatusFile() {
   return path.join(app.getPath('userData'), 'notch-status.json');
 }
 
+function wearStatusFile() {
+  return path.join(app.getPath('userData'), 'wear-status.json');
+}
+
+function wearSyncConfigFile() {
+  return path.join(app.getPath('userData'), 'wear-sync.json');
+}
+
 function notchMeterLogFile() {
   return path.join(app.getPath('userData'), 'notchmeter.log');
 }
@@ -89,10 +110,16 @@ function currentNotchStatus(nowMs = Date.now()) {
 }
 
 function writeNotchStatus() {
+  const status = currentNotchStatus();
   try {
-    writeJsonAtomic(notchStatusFile(), currentNotchStatus());
+    writeJsonAtomic(notchStatusFile(), status);
   } catch (e) {
     /* 表示用JSONの出力失敗は本体動作を止めない */
+  }
+  try {
+    writeJsonAtomic(wearStatusFile(), buildWearPayload(status));
+  } catch (e) {
+    /* Wear OS向けJSONの出力失敗も本体動作を止めない */
   }
 }
 
@@ -117,6 +144,67 @@ function saveState() {
   } catch (e) {
     /* 失敗は無視 */
   }
+}
+
+function loadWearSyncFileConfig() {
+  try {
+    const data = JSON.parse(fs.readFileSync(wearSyncConfigFile(), 'utf8'));
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function loadWearSyncConfig() {
+  const merged = Object.assign({}, loadWearSyncFileConfig());
+  const envConfig = envWearSyncConfig(process.env);
+  if (process.env.USAGE_METER_WEAR_SYNC != null) merged.enabled = envConfig.enabled;
+  if (process.env.USAGE_METER_WEAR_API_URL != null) merged.endpointUrl = envConfig.endpointUrl;
+  if (process.env.USAGE_METER_WEAR_API_KEY != null) merged.apiKey = envConfig.apiKey;
+  if (process.env.USAGE_METER_WEAR_TIMEOUT_MS != null) merged.timeoutMs = envConfig.timeoutMs;
+  return normalizeWearSyncConfig(merged);
+}
+
+function currentWearStatus(nowMs = Date.now()) {
+  return buildWearPayload(currentNotchStatus(nowMs));
+}
+
+function queueWearSync(reason) {
+  syncWearStatus(reason).catch(error => {
+    wearSyncInFlight = false;
+    wearSyncState.lastError = error && error.message ? error.message : 'REQUEST_FAILED';
+    updateTray();
+  });
+}
+
+async function syncWearStatus(reason = 'manual') {
+  if (wearSyncInFlight) return;
+  const config = loadWearSyncConfig();
+  const nowIso = new Date().toISOString();
+  wearSyncState.lastAttemptAt = nowIso;
+  wearSyncState.lastError = null;
+  wearSyncState.lastSkipped = null;
+
+  if (!config.enabled || !config.endpointUrl || !config.apiKey) {
+    wearSyncState.lastSkipped = 'not-configured';
+    updateTray();
+    return;
+  }
+
+  wearSyncInFlight = true;
+  updateTray();
+  const result = await postWearPayload(currentWearStatus(), config);
+  wearSyncInFlight = false;
+
+  if (result.ok) {
+    wearSyncState.lastSyncedAt = new Date().toISOString();
+    wearSyncState.lastError = null;
+    wearSyncState.lastSkipped = null;
+  } else {
+    wearSyncState.lastError = result.error || 'REQUEST_FAILED';
+    wearSyncState.lastSkipped = result.skipped ? reason : null;
+  }
+  updateTray();
 }
 
 function delay(ms) {
@@ -261,6 +349,7 @@ async function refreshAll(reason) {
   if (ids.length === 0) {
     refreshingProviders = {};
     writeNotchStatus();
+    queueWearSync('no-enabled-providers');
     pushUpdate();
     updateTray();
     return;
@@ -295,6 +384,7 @@ async function refreshAll(reason) {
     refreshing = false;
     refreshingProviders = {};
     saveState();
+    queueWearSync(reason || 'refresh');
     runThresholdNotifications();
   } finally {
     refreshing = false;
@@ -509,6 +599,14 @@ function copyNotchStatusPath() {
   clipboard.writeText(notchStatusFile());
 }
 
+function copyWearStatusPath() {
+  clipboard.writeText(wearStatusFile());
+}
+
+function copyWearSyncConfigPath() {
+  clipboard.writeText(wearSyncConfigFile());
+}
+
 function copyNotchMeterLog() {
   let log = notchMeterLastLog;
   if (!log) {
@@ -519,6 +617,44 @@ function copyNotchMeterLog() {
     }
   }
   clipboard.writeText(log || 'NotchMeter の起動ログはまだありません。');
+}
+
+function formatMenuTime(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function wearSyncStatusLabel(config) {
+  if (wearSyncInFlight) return '送信中...';
+  if (!config.enabled || !config.endpointUrl || !config.apiKey) return '未設定';
+  if (wearSyncState.lastError) return `失敗: ${wearSyncState.lastError}`;
+  const syncedAt = formatMenuTime(wearSyncState.lastSyncedAt);
+  if (syncedAt) return `送信済み: ${syncedAt}`;
+  return '送信待ち';
+}
+
+function wearSyncMenuItem() {
+  const config = loadWearSyncConfig();
+  return {
+    label: 'Wear OS同期',
+    submenu: [
+      { label: wearSyncStatusLabel(config), enabled: false },
+      { label: config.endpointUrl ? 'API URL: 設定済み' : 'API URL: 未設定', enabled: false },
+      { label: config.apiKey ? 'APIキー: 設定済み' : 'APIキー: 未設定', enabled: false },
+      { type: 'separator' },
+      {
+        label: '今すぐ送信',
+        enabled: config.enabled && Boolean(config.endpointUrl && config.apiKey) && !wearSyncInFlight,
+        click: () => queueWearSync('tray')
+      },
+      { label: '時計用JSONパスをコピー', click: copyWearStatusPath },
+      { label: '同期設定ファイルパスをコピー', click: copyWearSyncConfigPath }
+    ]
+  };
 }
 
 function buildTrayMenu() {
@@ -538,6 +674,7 @@ function buildTrayMenu() {
       enabled: canRefreshProviders() && !refreshing,
       click: () => refreshAll('manual')
     },
+    wearSyncMenuItem(),
     { label: '現在の状態をコピー', click: copyVisibleStatus },
     { type: 'separator' },
     {
@@ -906,6 +1043,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     loadState();
+    queueWearSync('startup-cache');
     applyAutoLaunch();
     createTray();
     if (prefs.notchMeterAutoStart) startNotchMeter();

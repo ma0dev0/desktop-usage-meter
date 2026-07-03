@@ -28,12 +28,45 @@ USAGE_METER_STATUS_PATH="$PWD/NotchMeter/Samples/notch-status.json" \
 
 詳しくは [NotchMeter/README.md](NotchMeter/README.md) を見てください。
 
+## Wear OS MVP（Pixel Watch 2）
+
+`wear/` にPixel Watch 2向けのJetpack Compose for Wear OSアプリを追加しています。時計アプリはCloudflare Worker等のHTTPS APIから最新JSONを取得し、Codex/Claudeの5時間・週間使用量、リセットまでの時間、最終更新を1画面に表示します。
+
+構成:
+
+- Usage Meter本体：`wear-status.json`をユーザーデータ領域へ出力し、設定があればAPIへPOST
+- API Worker：`api/cloudflare-worker/` の `GET /usage` / `POST /usage`
+- Wear OSアプリ：`wear/` をAndroid Studioで開いてPixel Watch 2へ実行
+
+Mac側のAPI送信設定は、APIキーをリポジトリへ含めないためユーザーデータ領域の `wear-sync.json` か環境変数で行います。トレイメニューの「Wear OS同期」から設定ファイルパスと時計用JSONパスをコピーできます。
+
+`wear-sync.json` の例:
+
+```json
+{
+  "enabled": true,
+  "endpointUrl": "https://usage-meter-api.example.workers.dev/usage",
+  "apiKey": "replace-with-worker-secret"
+}
+```
+
+環境変数で設定する場合:
+
+```sh
+USAGE_METER_WEAR_API_URL="https://usage-meter-api.example.workers.dev/usage" \
+USAGE_METER_WEAR_API_KEY="replace-with-worker-secret" \
+npm start
+```
+
+時計側は `wear/local.properties.example` を参考に `wear/local.properties` を作成します。このファイルは `.gitignore` 済みです。
+
 ## 仕組み
 
 - アプリ内の**隠しウィンドウ**で Claude/Codex の使用量ページを開き、`innerText` を取得して解析します（内部APIや外部サーバーには接続しません）。
 - 取得した値とリセット時刻を、メーター窓とトレイのツールチップに表示します。
 - Swift/AppKit版の `NotchMeter` 用に、表示専用JSON `notch-status.json` も出力します。書き込み中の一瞬だけ壊れたJSONを読ませないよう、一時ファイルから原子的に置き換えます。
-- データ本体は `chrome.storage` ではなく、ユーザーデータ領域の `state.json`（`app.getPath('userData')`）に保存します。NotchMeter 用の表示データだけ、同じ領域の `notch-status.json` にも出力します。
+- Wear OS版の表示用に、同じユーザーデータ領域へ `wear-status.json` も出力します。`wear-sync.json` または環境変数でAPI URL/APIキーが設定されている場合だけ、そのJSONをHTTPS APIへ送信します。
+- データ本体は `chrome.storage` ではなく、ユーザーデータ領域の `state.json`（`app.getPath('userData')`）に保存します。表示連携用の軽いJSONとして、同じ領域の `notch-status.json` と `wear-status.json` にも出力します。
 
 ### ログインについて（重要）
 
