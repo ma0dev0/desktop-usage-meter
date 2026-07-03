@@ -166,7 +166,7 @@ final class NotchMeterView: NSView {
 
     private func providerContentWidth(for provider: ProviderStatus, maxWidth: CGFloat) -> CGFloat {
         guard NotchStatusFormatting.visibleLimits(for: provider).isEmpty else {
-            return min(maxWidth, max(164, providerInlineWidth(provider)))
+            return min(maxWidth, max(172, providerInlineWidth(provider)))
         }
         return min(maxWidth, max(78, providerHeaderWidth(provider) + 4))
     }
@@ -180,11 +180,11 @@ final class NotchMeterView: NSView {
     }
 
     private func providerBackgroundRect(for rect: CGRect) -> CGRect {
-        let backgroundHeight = min(max(22, bounds.height - 10), 26)
+        let backgroundHeight = min(max(24, bounds.height - 8), 30)
         return CGRect(
-            x: rect.minX - 8,
+            x: rect.minX - 10,
             y: bounds.midY - backgroundHeight / 2,
-            width: rect.width + 16,
+            width: rect.width + 20,
             height: backgroundHeight
         )
     }
@@ -207,31 +207,30 @@ final class NotchMeterView: NSView {
             xRadius: backgroundRect.height / 2,
             yRadius: backgroundRect.height / 2
         )
+
+        let halo = NSBezierPath(
+            roundedRect: backgroundRect.insetBy(dx: -1.5, dy: -1.5),
+            xRadius: backgroundRect.height / 2 + 1.5,
+            yRadius: backgroundRect.height / 2 + 1.5
+        )
+        NSColor.black.withAlphaComponent(stale ? 0.20 : (hovered ? 0.42 : 0.30)).setFill()
+        halo.fill()
+
         let backgroundAlpha: CGFloat = stale
-            ? (hovered ? 0.56 : 0.48)
-            : (hovered ? 0.66 : 0.54)
-        NSColor(calibratedWhite: 0.02, alpha: backgroundAlpha).setFill()
+            ? (hovered ? 0.74 : 0.64)
+            : (hovered ? 0.94 : 0.88)
+        NSColor(calibratedWhite: 0.0, alpha: backgroundAlpha).setFill()
         background.fill()
 
-        if (urgency != .normal || hasRefreshError || isRefreshing) && !stale {
-            accentColor.withAlphaComponent(hovered ? 0.08 : 0.045).setFill()
-            background.fill()
-        }
-
-        if urgency != .normal || hasRefreshError || isRefreshing {
-            let accentRect = CGRect(
-                x: backgroundRect.minX + 5,
-                y: backgroundRect.midY - 5,
-                width: 2,
-                height: 10
-            )
-            let accent = NSBezierPath(
-                roundedRect: accentRect,
-                xRadius: 1,
-                yRadius: 1
-            )
-            accentColor.withAlphaComponent(stale ? 0.28 : (hovered ? 0.78 : 0.64)).setFill()
-            accent.fill()
+        if let gradient = NSGradient(colors: [
+            NSColor.white.withAlphaComponent(hovered ? 0.10 : 0.07),
+            NSColor.white.withAlphaComponent(0.015),
+            NSColor.black.withAlphaComponent(0.12)
+        ]) {
+            NSGraphicsContext.saveGraphicsState()
+            background.addClip()
+            gradient.draw(in: backgroundRect, angle: 90)
+            NSGraphicsContext.restoreGraphicsState()
         }
 
         let border = NSBezierPath(
@@ -240,30 +239,51 @@ final class NotchMeterView: NSView {
             yRadius: (backgroundRect.height - 1) / 2
         )
         border.lineWidth = 1
-        NSColor.white.withAlphaComponent(hovered ? 0.18 : 0.08).setStroke()
+        NSColor.white.withAlphaComponent(stale ? 0.06 : (hovered ? 0.16 : 0.085)).setStroke()
         border.stroke()
+
+        let showsAccent = urgency != .normal || hasRefreshError || isRefreshing
+        let accentAlpha: CGFloat = showsAccent
+            ? (stale ? 0.08 : (hovered ? 0.20 : 0.13))
+            : 0
+        accentColor.withAlphaComponent(accentAlpha).setStroke()
+        border.stroke()
+
+        let innerHighlight = NSBezierPath()
+        innerHighlight.lineWidth = 0.8
+        innerHighlight.lineCapStyle = .round
+        innerHighlight.move(to: CGPoint(x: backgroundRect.minX + backgroundRect.height / 2, y: backgroundRect.minY + 1.2))
+        innerHighlight.line(to: CGPoint(x: backgroundRect.maxX - backgroundRect.height / 2, y: backgroundRect.minY + 1.2))
+        NSColor.white.withAlphaComponent(hovered ? 0.16 : 0.10).setStroke()
+        innerHighlight.stroke()
     }
 
     private func drawPlaceholderBackground(in rect: CGRect) {
         let backgroundRect = providerBackgroundRect(for: rect)
+        let halo = NSBezierPath(
+            roundedRect: backgroundRect.insetBy(dx: -1.5, dy: -1.5),
+            xRadius: backgroundRect.height / 2 + 1.5,
+            yRadius: backgroundRect.height / 2 + 1.5
+        )
+        NSColor.black.withAlphaComponent(isPlaceholderHovered ? 0.42 : 0.30).setFill()
+        halo.fill()
+
         let background = NSBezierPath(
             roundedRect: backgroundRect,
             xRadius: backgroundRect.height / 2,
             yRadius: backgroundRect.height / 2
         )
-        NSColor(calibratedWhite: 0.02, alpha: isPlaceholderHovered ? 0.88 : 0.78).setFill()
+        NSColor(calibratedWhite: 0.0, alpha: isPlaceholderHovered ? 0.94 : 0.88).setFill()
         background.fill()
 
-        if isPlaceholderHovered {
-            let border = NSBezierPath(
-                roundedRect: backgroundRect.insetBy(dx: 0.5, dy: 0.5),
-                xRadius: (backgroundRect.height - 1) / 2,
-                yRadius: (backgroundRect.height - 1) / 2
-            )
-            border.lineWidth = 1.4
-            NSColor.white.withAlphaComponent(0.22).setStroke()
-            border.stroke()
-        }
+        let border = NSBezierPath(
+            roundedRect: backgroundRect.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: (backgroundRect.height - 1) / 2,
+            yRadius: (backgroundRect.height - 1) / 2
+        )
+        border.lineWidth = isPlaceholderHovered ? 1.2 : 1
+        NSColor.white.withAlphaComponent(isPlaceholderHovered ? 0.18 : 0.09).setStroke()
+        border.stroke()
     }
 
     private func drawPlaceholder(in rect: CGRect) {
@@ -454,21 +474,46 @@ final class NotchMeterView: NSView {
 
     private func drawProviderIcon(_ provider: ProviderStatus, in rect: CGRect) {
         let color = providerIconColor(for: provider)
+        let tokenRect = rect.insetBy(dx: -1, dy: -1)
         let background = NSBezierPath(
-            roundedRect: rect,
-            xRadius: 4,
-            yRadius: 4
+            roundedRect: tokenRect,
+            xRadius: 5,
+            yRadius: 5
         )
+        NSColor(calibratedWhite: 0.0, alpha: 0.40).setFill()
+        background.fill()
+
         color.withAlphaComponent(0.16).setFill()
         background.fill()
 
+        if let gradient = NSGradient(colors: [
+            NSColor.white.withAlphaComponent(0.18),
+            NSColor.white.withAlphaComponent(0.02),
+            NSColor.black.withAlphaComponent(0.18)
+        ]) {
+            NSGraphicsContext.saveGraphicsState()
+            background.addClip()
+            gradient.draw(in: tokenRect, angle: 90)
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        let border = NSBezierPath(
+            roundedRect: tokenRect.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: 4.5,
+            yRadius: 4.5
+        )
+        border.lineWidth = 1
+        color.withAlphaComponent(provider.loggedIn == false ? 0.18 : 0.34).setStroke()
+        border.stroke()
+
+        let glyphRect = rect.insetBy(dx: 0.2, dy: 0.2)
         switch provider.id.lowercased() {
         case "claude":
-            drawClaudeIcon(in: rect, color: color)
+            drawClaudeIcon(in: glyphRect, color: color.withAlphaComponent(0.94))
         case "codex":
-            drawCodexIcon(in: rect, color: color)
+            drawCodexIcon(in: glyphRect, color: color.withAlphaComponent(0.94))
         default:
-            let dot = NSBezierPath(ovalIn: rect.insetBy(dx: 4, dy: 4))
+            let dot = NSBezierPath(ovalIn: glyphRect.insetBy(dx: 4, dy: 4))
             color.setFill()
             dot.fill()
         }
@@ -525,7 +570,7 @@ final class NotchMeterView: NSView {
         let labelFont = NSFont.monospacedSystemFont(ofSize: 7.5, weight: .bold)
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: labelFont,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.52),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.46),
             .kern: 0
         ]
         let labelSize = label.size(withAttributes: labelAttributes)
@@ -534,7 +579,7 @@ final class NotchMeterView: NSView {
             withAttributes: labelAttributes
         )
 
-        let barHeight: CGFloat = 4
+        let barHeight: CGFloat = 4.5
         let barRect = CGRect(
             x: rect.minX + labelWidth,
             y: rect.midY - barHeight / 2,
@@ -546,8 +591,17 @@ final class NotchMeterView: NSView {
             xRadius: barHeight / 2,
             yRadius: barHeight / 2
         )
-        NSColor.white.withAlphaComponent(0.16).setFill()
+        NSColor.white.withAlphaComponent(0.08).setFill()
         track.fill()
+
+        let trackBorder = NSBezierPath(
+            roundedRect: barRect.insetBy(dx: 0.25, dy: 0.25),
+            xRadius: (barHeight - 0.5) / 2,
+            yRadius: (barHeight - 0.5) / 2
+        )
+        trackBorder.lineWidth = 0.5
+        NSColor.white.withAlphaComponent(0.08).setStroke()
+        trackBorder.stroke()
 
         if let used = limit.percentUsed, used > 0 {
             let usedRatio = CGFloat(clampPercent(used)) / 100
@@ -562,52 +616,93 @@ final class NotchMeterView: NSView {
                 xRadius: barHeight / 2,
                 yRadius: barHeight / 2
             )
-            usageColor(for: limit, used: used)
-                .withAlphaComponent(NotchStatusFormatting.isStale(provider: provider, in: status) ? 0.42 : 0.86)
-                .setFill()
-            fill.fill()
+            let baseColor = usageColor(for: limit, used: used)
+            let highlightColor = baseColor.blended(withFraction: 0.22, of: NSColor.white) ?? baseColor
+            let stale = NotchStatusFormatting.isStale(provider: provider, in: status)
+            if let gradient = NSGradient(colors: [
+                highlightColor.withAlphaComponent(stale ? 0.46 : 0.94),
+                baseColor.withAlphaComponent(stale ? 0.38 : 0.86)
+            ]) {
+                NSGraphicsContext.saveGraphicsState()
+                fill.addClip()
+                gradient.draw(in: fillRect, angle: 0)
+                NSGraphicsContext.restoreGraphicsState()
+            } else {
+                baseColor.withAlphaComponent(stale ? 0.38 : 0.86).setFill()
+                fill.fill()
+            }
+
+            let fillShine = NSBezierPath()
+            fillShine.lineWidth = 0.7
+            fillShine.lineCapStyle = .round
+            fillShine.move(to: CGPoint(x: fillRect.minX + 1.5, y: fillRect.minY + 0.9))
+            fillShine.line(to: CGPoint(x: max(fillRect.minX + 1.5, fillRect.maxX - 1.5), y: fillRect.minY + 0.9))
+            NSColor.white.withAlphaComponent(stale ? 0.08 : 0.16).setStroke()
+            fillShine.stroke()
         }
 
         if let expected = limit.expectedUsed {
             let markerX = barRect.minX + barRect.width * CGFloat(clampPercent(expected)) / 100
             let shadowRect = CGRect(
-                x: markerX - 1.3,
-                y: barRect.minY - 2,
-                width: 2.6,
-                height: barRect.height + 4
+                x: markerX - 1.1,
+                y: barRect.minY - 1.6,
+                width: 2.2,
+                height: barRect.height + 3.2
             )
             let shadow = NSBezierPath(
                 roundedRect: shadowRect,
-                xRadius: 1.3,
-                yRadius: 1.3
+                xRadius: 1.1,
+                yRadius: 1.1
             )
-            NSColor.black.withAlphaComponent(0.55).setFill()
+            NSColor.black.withAlphaComponent(0.42).setFill()
             shadow.fill()
 
             let markerRect = CGRect(
-                x: markerX - 0.6,
-                y: barRect.minY - 1.6,
-                width: 1.2,
-                height: barRect.height + 3.2
+                x: markerX - 0.45,
+                y: barRect.minY - 1.25,
+                width: 0.9,
+                height: barRect.height + 2.5
             )
             let marker = NSBezierPath(
                 roundedRect: markerRect,
-                xRadius: 0.6,
-                yRadius: 0.6
+                xRadius: 0.45,
+                yRadius: 0.45
             )
-            NSColor.white.withAlphaComponent(0.92).setFill()
+            NSColor.white.withAlphaComponent(0.82).setFill()
             marker.fill()
         }
     }
 
     private func drawResetTimer(_ text: String, in rect: CGRect) {
+        let halo = NSBezierPath(
+            roundedRect: rect.insetBy(dx: -0.8, dy: -0.8),
+            xRadius: rect.height / 2 + 0.8,
+            yRadius: rect.height / 2 + 0.8
+        )
+        NSColor.black.withAlphaComponent(0.30).setFill()
+        halo.fill()
+
         let badge = NSBezierPath(
             roundedRect: rect,
             xRadius: rect.height / 2,
             yRadius: rect.height / 2
         )
-        hudYellow().withAlphaComponent(0.12).setFill()
+        NSColor(calibratedWhite: 0.0, alpha: 0.46).setFill()
         badge.fill()
+
+        hudYellow().withAlphaComponent(0.08).setFill()
+        badge.fill()
+
+        if let gradient = NSGradient(colors: [
+            NSColor.white.withAlphaComponent(0.12),
+            NSColor.white.withAlphaComponent(0.02),
+            NSColor.black.withAlphaComponent(0.16)
+        ]) {
+            NSGraphicsContext.saveGraphicsState()
+            badge.addClip()
+            gradient.draw(in: rect, angle: 90)
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         let border = NSBezierPath(
             roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
@@ -615,7 +710,7 @@ final class NotchMeterView: NSView {
             yRadius: (rect.height - 1) / 2
         )
         border.lineWidth = 1
-        hudYellow().withAlphaComponent(0.28).setStroke()
+        hudYellow().withAlphaComponent(0.34).setStroke()
         border.stroke()
 
         let font = NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .semibold)
@@ -748,7 +843,7 @@ final class NotchMeterView: NSView {
             .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .semibold),
             .kern: 0
         ]
-        return max(17, ceil(text.size(withAttributes: attributes).width) + 6)
+        return max(19, ceil(text.size(withAttributes: attributes).width) + 8)
     }
 
     private func drawStaleIcon(in rect: CGRect) {
@@ -902,19 +997,19 @@ final class NotchMeterView: NSView {
     }
 
     private func hudRed() -> NSColor {
-        NSColor(calibratedRed: 0.92, green: 0.30, blue: 0.32, alpha: 1)
+        NSColor(calibratedRed: 0.98, green: 0.24, blue: 0.32, alpha: 1)
     }
 
     private func hudOrange() -> NSColor {
-        NSColor(calibratedRed: 0.94, green: 0.52, blue: 0.25, alpha: 1)
+        NSColor(calibratedRed: 1.00, green: 0.54, blue: 0.22, alpha: 1)
     }
 
     private func hudYellow() -> NSColor {
-        NSColor(calibratedRed: 0.90, green: 0.70, blue: 0.26, alpha: 1)
+        NSColor(calibratedRed: 0.98, green: 0.73, blue: 0.28, alpha: 1)
     }
 
     private func hudGreen() -> NSColor {
-        NSColor(calibratedRed: 0.34, green: 0.76, blue: 0.34, alpha: 1)
+        NSColor(calibratedRed: 0.22, green: 0.82, blue: 0.48, alpha: 1)
     }
 
     private func providerColor(_ hex: String?) -> NSColor {

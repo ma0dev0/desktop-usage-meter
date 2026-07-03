@@ -30,7 +30,8 @@ function status({
   resetInMin = 180,
   weeklyUsed = null,
   refreshError = null,
-  capturedAt = nowMs - MINUTE_MS
+  capturedAt = nowMs - MINUTE_MS,
+  refreshing = false
 } = {}) {
   const limits = [
     {
@@ -60,6 +61,7 @@ function status({
     enabled: true,
     visible: true,
     loggedIn: true,
+    refreshing,
     refreshError,
     limits
   };
@@ -150,6 +152,43 @@ test('5時間リセットは30分と10分で一度ずつ通知する', () => {
   });
   assert.equal(result.events.length, 1);
   assert.equal(result.events[0].title, 'Claude 5時間 リセットまで10分');
+});
+
+test('取得中のプロバイダーは通知せず既存状態を保持する', () => {
+  const existingState = {
+    usage: {
+      'claude:fivehour': {
+        cycleID: String(baseNow + 30 * MINUTE_MS),
+        threshold: 90
+      }
+    },
+    resets: {
+      'claude:fivehour': {
+        resetID: String(baseNow + 30 * MINUTE_MS),
+        threshold: 30
+      }
+    },
+    health: {
+      'claude:health': {
+        issueID: 'stale',
+        firstSeenAt: baseNow - 30 * MINUTE_MS,
+        notified: true
+      }
+    }
+  };
+  const result = evaluateThresholdNotifications({
+    status: status({
+      used: 96,
+      resetInMin: 10,
+      capturedAt: baseNow - 30 * MINUTE_MS,
+      refreshing: true
+    }),
+    state: existingState,
+    nowMs: baseNow
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(result.state, existingState);
 });
 
 test('取得エラー中のプロバイダーは通知しない', () => {

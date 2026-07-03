@@ -51,6 +51,12 @@ npm run notch:preview:missing
 npm run notch:preview:unreadable
 ```
 
+Swiftビルド、全プレビュー生成、画像回帰チェック、VoiceOver向け要約チェックをまとめて確認する場合は次を使います。
+
+```sh
+npm run notch:verify
+```
+
 生成済みプレビューがノッチ中央の安全帯を侵食していないか、Claude/Codex の左右ホームポジションが崩れていないか、下段の5時間/週間ミニバーが見えているか、ホバー時に対象カプセルだけ反応するか、未ログイン/未取得/待機/読み込み失敗状態が落ち着いて表示されるかは、次で確認できます。
 
 ```sh
