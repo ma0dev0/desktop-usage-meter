@@ -78,6 +78,7 @@ function shouldEvaluateProvider(provider) {
     provider.enabled !== false &&
     provider.visible !== false &&
     provider.loggedIn !== false &&
+    !provider.refreshing &&
     !provider.refreshError
   );
 }
@@ -87,7 +88,8 @@ function shouldEvaluateProviderHealth(provider) {
     provider &&
     provider.enabled !== false &&
     provider.visible !== false &&
-    provider.loggedIn !== false
+    provider.loggedIn !== false &&
+    !provider.refreshing
   );
 }
 
@@ -295,6 +297,18 @@ function evaluateThresholdNotifications({
   const providers = status && Array.isArray(status.providers) ? status.providers : [];
 
   for (const provider of providers) {
+    if (provider && provider.refreshing) {
+      if (provider.id) activeHealthKeys.add(`${provider.id}:health`);
+      const limits = Array.isArray(provider.limits) ? provider.limits : [];
+      for (const limit of limits) {
+        if (!provider.id || !limit || !limit.key) continue;
+        const key = `${provider.id}:${limit.key}`;
+        activeUsageKeys.add(key);
+        if (limit.key === 'fivehour') activeResetKeys.add(key);
+      }
+      continue;
+    }
+
     if (shouldEvaluateProviderHealth(provider)) {
       const key = `${provider.id}:health`;
       activeHealthKeys.add(key);
