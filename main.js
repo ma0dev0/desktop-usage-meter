@@ -28,6 +28,10 @@ const {
   notificationStateChanged
 } = require('./src/thresholdNotifications');
 const {
+  canAttemptNotification,
+  nextNotificationDeliveryState
+} = require('./src/notificationDelivery');
+const {
   appendLogText,
   buildLogHeader,
   buildNotchMeterCommand,
@@ -59,6 +63,7 @@ let results = { claude: null, codex: null };
 let refreshErrors = {};
 let refreshingProviders = {};
 let notificationState = {};
+let notificationDeliveryState = {};
 
 let tray = null;
 let meterWin = null;
@@ -196,7 +201,15 @@ function syncThresholdNotifications({ notify = true, forceSave = false } = {}) {
     nowMs
   });
 
+  if (notify && result.events.length > 0 && !canAttemptNotification(notificationDeliveryState, nowMs)) {
+    return;
+  }
+
   const delivered = !notify || showThresholdNotifications(result.events);
+  notificationDeliveryState = nextNotificationDeliveryState({
+    delivered,
+    nowMs
+  });
   if (!delivered) return;
 
   notificationState = result.state;
