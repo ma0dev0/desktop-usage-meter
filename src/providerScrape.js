@@ -1,4 +1,5 @@
 const PARSE_FAILED = 'PARSE_FAILED';
+const SCRAPE_FAILED = 'SCRAPE_FAILED';
 
 function parseProviderUsage(provider, bodyText) {
   if (!provider || typeof provider.parse !== 'function') {
@@ -16,7 +17,25 @@ function parseProviderUsage(provider, bodyText) {
   }
 }
 
+async function scrapeProviderSafely(scrape, provider) {
+  if (typeof scrape !== 'function') {
+    return { error: SCRAPE_FAILED };
+  }
+
+  try {
+    const result = await scrape(provider);
+    if (!result || typeof result !== 'object') {
+      return { error: SCRAPE_FAILED };
+    }
+    return result;
+  } catch (error) {
+    return { error: SCRAPE_FAILED };
+  }
+}
+
 module.exports = {
   PARSE_FAILED,
-  parseProviderUsage
+  SCRAPE_FAILED,
+  parseProviderUsage,
+  scrapeProviderSafely
 };

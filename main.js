@@ -19,7 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { writeJsonAtomic } = require('./src/atomicFile');
-const { parseProviderUsage } = require('./src/providerScrape');
+const { parseProviderUsage, scrapeProviderSafely } = require('./src/providerScrape');
 const { providers, isLoginUrl } = require('./src/providers');
 const { buildStatusSummary } = require('./src/statusSummary');
 const { buildNotchStatus } = require('./src/notchStatus');
@@ -280,7 +280,7 @@ async function refreshAll(reason) {
       pushUpdate();
       updateTray();
 
-      const res = await scrapeOne(providers[id]);
+      const res = await scrapeProviderSafely(scrapeOne, providers[id]);
       if (res && res.error) {
         refreshErrors[id] = res.error;
       } else if (res) {

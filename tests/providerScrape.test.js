@@ -1,17 +1,14 @@
 const assert = require('assert').strict;
-const { PARSE_FAILED, parseProviderUsage } = require('../src/providerScrape');
+const {
+  PARSE_FAILED,
+  SCRAPE_FAILED,
+  parseProviderUsage,
+  scrapeProviderSafely
+} = require('../src/providerScrape');
 
-let passed = 0;
+const tests = [];
 function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log('ok   -', name);
-  } catch (err) {
-    console.error('FAIL -', name);
-    console.error(err);
-    process.exitCode = 1;
-  }
+  tests.push({ name, fn });
 }
 
 test('プロバイダーの解析結果をそのまま返す', () => {
@@ -58,4 +55,61 @@ test('parse関数がないプロバイダーも解析失敗にする', () => {
   });
 });
 
-console.log(`\n${passed} passed`);
+test('スクレイプ成功結果をそのまま返す', async () => {
+  const provider = { id: 'codex' };
+  const result = await scrapeProviderSafely(async inputProvider => {
+    assert.equal(inputProvider, provider);
+    return {
+      relatedFound: true,
+      percentRemaining: 51
+    };
+  }, provider);
+
+  assert.deepEqual(result, {
+    relatedFound: true,
+    percentRemaining: 51
+  });
+});
+
+test('スクレイプ例外は取得失敗にする', async () => {
+  const result = await scrapeProviderSafely(async () => {
+    throw new Error('webContents destroyed');
+  }, { id: 'claude' });
+
+  assert.deepEqual(result, {
+    error: SCRAPE_FAILED
+  });
+});
+
+test('スクレイプ結果がオブジェクトでなければ取得失敗にする', async () => {
+  assert.deepEqual(await scrapeProviderSafely(async () => null, { id: 'codex' }), {
+    error: SCRAPE_FAILED
+  });
+  assert.deepEqual(await scrapeProviderSafely(async () => 'bad', { id: 'codex' }), {
+    error: SCRAPE_FAILED
+  });
+});
+
+test('スクレイプ関数がなければ取得失敗にする', async () => {
+  assert.deepEqual(await scrapeProviderSafely(null, { id: 'codex' }), {
+    error: SCRAPE_FAILED
+  });
+});
+
+async function run() {
+  let passed = 0;
+  for (const entry of tests) {
+    try {
+      await entry.fn();
+      passed++;
+      console.log('ok   -', entry.name);
+    } catch (err) {
+      console.error('FAIL -', entry.name);
+      console.error(err);
+      process.exitCode = 1;
+    }
+  }
+  console.log(`\n${passed} passed`);
+}
+
+run();
