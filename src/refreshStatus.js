@@ -5,7 +5,8 @@
   if (root) root.RefreshStatus = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, () => {
   const ERROR_LABELS = {
-    LOAD_FAILED: '読み込み失敗'
+    LOAD_FAILED: '読み込み失敗',
+    PARSE_FAILED: '解析失敗'
   };
 
   function refreshErrorLabel(error) {

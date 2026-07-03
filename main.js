@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { writeJsonAtomic } = require('./src/atomicFile');
+const { parseProviderUsage } = require('./src/providerScrape');
 const { providers, isLoginUrl } = require('./src/providers');
 const { buildStatusSummary } = require('./src/statusSummary');
 const { buildNotchStatus } = require('./src/notchStatus');
@@ -239,7 +240,8 @@ async function scrapeOne(provider) {
     const curUrl = win.webContents.getURL();
     if (isLoginUrl(curUrl)) return { loggedIn: false, url: curUrl, capturedAt: Date.now() };
 
-    const parsed = provider.parse((data && data.bodyText) || '');
+    const parsed = parseProviderUsage(provider, (data && data.bodyText) || '');
+    if (parsed.error) return parsed;
     if (parsed.relatedFound) {
       return Object.assign({}, parsed, {
         loggedIn: true,
