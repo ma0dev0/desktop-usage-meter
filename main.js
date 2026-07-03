@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { writeJsonAtomic } = require('./src/atomicFile');
+const { parseProviderUsage, scrapeProviderSafely } = require('./src/providerScrape');
 const { normalizeMeterBounds } = require('./src/windowBounds');
 const { providers, isLoginUrl } = require('./src/providers');
 const { buildStatusSummary } = require('./src/statusSummary');
@@ -253,7 +254,8 @@ async function scrapeOne(provider) {
     const curUrl = win.webContents.getURL();
     if (isLoginUrl(curUrl)) return { loggedIn: false, url: curUrl, capturedAt: Date.now() };
 
-    const parsed = provider.parse((data && data.bodyText) || '');
+    const parsed = parseProviderUsage(provider, (data && data.bodyText) || '');
+    if (parsed.error) return parsed;
     if (parsed.relatedFound) {
       return Object.assign({}, parsed, {
         loggedIn: true,
@@ -292,7 +294,7 @@ async function refreshAll(reason) {
       pushUpdate();
       updateTray();
 
-      const res = await scrapeOne(providers[id]);
+      const res = await scrapeProviderSafely(scrapeOne, providers[id]);
       if (res && res.error) {
         refreshErrors[id] = res.error;
       } else if (res) {
