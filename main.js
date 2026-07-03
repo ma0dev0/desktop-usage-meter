@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { writeJsonAtomic } = require('./src/atomicFile');
+const { normalizeMeterBounds } = require('./src/windowBounds');
 const { providers, isLoginUrl } = require('./src/providers');
 const { buildStatusSummary } = require('./src/statusSummary');
 const { buildNotchStatus } = require('./src/notchStatus');
@@ -688,11 +689,46 @@ function weeklyPaceItem(label, value) {
 
 // --- メーター窓 ---
 
-function defaultMeterBounds() {
-  const wa = screen.getPrimaryDisplay().workArea;
-  const width = 320;
-  const height = 180;
-  return { width, height, x: wa.x + wa.width - width - 16, y: wa.y + 16 };
+function hasUsableBounds(bounds) {
+  return bounds
+    && Number.isFinite(bounds.x)
+    && Number.isFinite(bounds.y)
+    && Number.isFinite(bounds.width)
+    && Number.isFinite(bounds.height);
+}
+
+function workAreaForMeterBounds(bounds) {
+  try {
+    if (hasUsableBounds(bounds)) {
+      return screen.getDisplayMatching(bounds).workArea;
+    }
+  } catch (e) {
+    /* プライマリ画面へフォールバック */
+  }
+  return screen.getPrimaryDisplay().workArea;
+}
+
+function restoredMeterBounds() {
+  const savedBounds = hasUsableBounds(prefs.meterBounds) ? prefs.meterBounds : null;
+  return normalizeMeterBounds(savedBounds, workAreaForMeterBounds(savedBounds));
+}
+
+function ensureMeterWithinVisibleWorkArea() {
+  if (!meterWin || meterWin.isDestroyed()) return;
+  const currentBounds = meterWin.getBounds();
+  const nextBounds = normalizeMeterBounds(currentBounds, workAreaForMeterBounds(currentBounds));
+  if (
+    currentBounds.x === nextBounds.x
+    && currentBounds.y === nextBounds.y
+    && currentBounds.width === nextBounds.width
+    && currentBounds.height === nextBounds.height
+  ) {
+    return;
+  }
+  meterWin.setBounds(nextBounds, false);
+  prefs.meterBounds = nextBounds;
+  saveState();
+  updateTray();
 }
 
 function createMeter() {
@@ -700,7 +736,7 @@ function createMeter() {
     meterWin.show();
     return;
   }
-  const b = prefs.meterBounds || defaultMeterBounds();
+  const b = restoredMeterBounds();
   meterWin = new BrowserWindow({
     width: b.width,
     height: b.height,
@@ -828,6 +864,11 @@ function registerShortcuts() {
   }
 }
 
+function registerDisplayBoundsGuard() {
+  screen.on('display-removed', ensureMeterWithinVisibleWorkArea);
+  screen.on('display-metrics-changed', ensureMeterWithinVisibleWorkArea);
+}
+
 // --- IPC ---
 
 ipcMain.handle('getState', () => appStatePayload());
@@ -868,6 +909,7 @@ if (!gotLock) {
     createTray();
     if (prefs.notchMeterAutoStart) startNotchMeter();
     registerShortcuts();
+    registerDisplayBoundsGuard();
     createMeter();
     startTimer();
     startDisplayRefreshTimer();
