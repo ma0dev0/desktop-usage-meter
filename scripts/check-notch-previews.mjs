@@ -4,9 +4,9 @@ import zlib from 'node:zlib';
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const previews = [
-  { path: '/tmp/notchmeter-preview.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true },
-  { path: '/tmp/notchmeter-critical.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true },
-  { path: '/tmp/notchmeter-single.png', transparent: true, leftContent: false, rightContent: true, leftBars: false, rightBars: true },
+  { path: '/tmp/notchmeter-preview.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true, resetTimers: false },
+  { path: '/tmp/notchmeter-critical.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true, resetTimers: true },
+  { path: '/tmp/notchmeter-single.png', transparent: true, leftContent: false, rightContent: true, leftBars: false, rightBars: true, resetTimers: false },
   { path: '/tmp/notchmeter-backdrop.png', transparent: false, leftBars: true, rightBars: true },
   { path: '/tmp/notchmeter-hover.png', transparent: false, leftBars: true, rightBars: true },
   { path: '/tmp/notchmeter-hover-right.png', transparent: false, leftBars: true, rightBars: true },
@@ -15,8 +15,8 @@ const previews = [
   { path: '/tmp/notchmeter-login-required.png', transparent: false, leftBars: false, rightBars: false },
   { path: '/tmp/notchmeter-stale.png', transparent: false, leftBars: true, rightBars: true },
   { path: '/tmp/notchmeter-unavailable.png', transparent: true, leftContent: true, rightContent: true, leftBars: false, rightBars: false },
-  { path: '/tmp/notchmeter-refreshing.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true },
-  { path: '/tmp/notchmeter-refresh-error.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true },
+  { path: '/tmp/notchmeter-refreshing.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true, resetTimers: false },
+  { path: '/tmp/notchmeter-refresh-error.png', transparent: true, leftContent: true, rightContent: true, leftBars: true, rightBars: true, resetTimers: false },
   { path: '/tmp/notchmeter-missing.png', transparent: false, leftBars: false, rightBars: false },
   { path: '/tmp/notchmeter-unreadable.png', transparent: false, leftBars: false, rightBars: false }
 ];
@@ -160,12 +160,32 @@ function countVividRunPixels(image, region) {
   return count;
 }
 
+function countResetTimerPixels(image, region) {
+  let count = 0;
+  for (let y = region.y; y < region.y + region.height; y++) {
+    for (let x = region.x; x < region.x + region.width; x++) {
+      if (isResetTimerPixel(rgbaAt(image, x, y))) count++;
+    }
+  }
+  return count;
+}
+
 function isVividPixel({ red, green, blue, alpha }) {
   if (alpha <= 40) return false;
   const max = Math.max(red, green, blue);
   const min = Math.min(red, green, blue);
   const saturation = max === 0 ? 0 : (max - min) / max;
   return max > 95 && saturation > 0.28;
+}
+
+function isResetTimerPixel({ red, green, blue, alpha }) {
+  if (alpha <= 40) return false;
+  return red > 170
+    && green > 120
+    && green < 210
+    && blue < 95
+    && red - green > 15
+    && green - blue > 45;
 }
 
 for (const preview of previews) {
@@ -233,6 +253,7 @@ for (const preview of previews) {
   }
 
   assertLimitBars({ preview, image });
+  assertResetTimers({ preview, image });
 
   console.log(`ok   - ${preview.path} ${image.width}x${image.height}`);
 }
@@ -366,6 +387,54 @@ function assertRegionBars({ path, name, count, expected }) {
   }
   if (!expected && count > 80) {
     throw new Error(`${path}: unexpected ${name} (${count} vivid pixels)`);
+  }
+}
+
+function assertResetTimers({ preview, image }) {
+  if (preview.resetTimers == null) return;
+
+  const timerBand = {
+    y: Math.round(image.height * 0.25),
+    height: Math.round(image.height * 0.5)
+  };
+  const leftTimerRegion = {
+    x: Math.round(image.width * 0.035),
+    y: timerBand.y,
+    width: Math.round(image.width * 0.055),
+    height: timerBand.height
+  };
+  const rightTimerRegion = {
+    x: Math.round(image.width * 0.915),
+    y: timerBand.y,
+    width: Math.round(image.width * 0.06),
+    height: timerBand.height
+  };
+  const centerNotchRegion = {
+    x: Math.round(image.width * 0.42),
+    y: timerBand.y,
+    width: Math.round(image.width * 0.16),
+    height: timerBand.height
+  };
+
+  const leftTimerPixels = countResetTimerPixels(image, leftTimerRegion);
+  const rightTimerPixels = countResetTimerPixels(image, rightTimerRegion);
+  const centerTimerPixels = countResetTimerPixels(image, centerNotchRegion);
+
+  if (preview.resetTimers) {
+    if (leftTimerPixels < 80) {
+      throw new Error(`${preview.path}: expected left outer reset timer, found only ${leftTimerPixels} timer pixels`);
+    }
+    if (rightTimerPixels < 80) {
+      throw new Error(`${preview.path}: expected right outer reset timer, found only ${rightTimerPixels} timer pixels`);
+    }
+    if (centerTimerPixels > 0) {
+      throw new Error(`${preview.path}: reset timer intrudes into center notch area (${centerTimerPixels} timer pixels)`);
+    }
+  } else if (leftTimerPixels > 30 || rightTimerPixels > 30 || centerTimerPixels > 0) {
+    throw new Error(
+      `${preview.path}: unexpected reset timer pixels ` +
+        `(left=${leftTimerPixels}, right=${rightTimerPixels}, center=${centerTimerPixels})`
+    );
   }
 }
 
