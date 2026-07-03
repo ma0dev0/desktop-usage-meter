@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { writeJsonAtomic } = require('./src/atomicFile');
+const { normalizePrefs } = require('./src/preferences');
 const { parseProviderUsage, scrapeProviderSafely } = require('./src/providerScrape');
 const { normalizeMeterBounds } = require('./src/windowBounds');
 const { providers, isLoginUrl } = require('./src/providers');
@@ -45,21 +46,7 @@ const DISPLAY_REFRESH_MS = 60 * 1000;
 const EXTRACT_JS =
   "(() => ({ url: location.href, title: document.title, bodyText: (document.body && document.body.innerText) || '' }))()";
 
-const DEFAULT_PREFS = {
-  theme: 'auto',
-  opacity: 0.96,
-  alwaysOnTop: true,
-  intervalMin: 5,
-  weeklyPaceMode: 'calendar',
-  providers: { claude: true, codex: true },
-  thresholdNotifications: true,
-  autoLaunch: false,
-  notchMeterAutoStart: false,
-  meterBounds: null,
-  meterVisible: true
-};
-
-let prefs = Object.assign({}, DEFAULT_PREFS);
+let prefs = normalizePrefs();
 let results = { claude: null, codex: null };
 let refreshErrors = {};
 let refreshingProviders = {};
@@ -112,8 +99,7 @@ function writeNotchStatus() {
 function loadState() {
   try {
     const data = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
-    if (data.prefs) prefs = Object.assign({}, DEFAULT_PREFS, data.prefs);
-    if (data.prefs && data.prefs.providers) prefs.providers = Object.assign({ claude: true, codex: true }, data.prefs.providers);
+    if (data.prefs) prefs = normalizePrefs(data.prefs);
     if (data.results) results = Object.assign({ claude: null, codex: null }, data.results);
     if (data.notificationState && typeof data.notificationState === 'object') {
       notificationState = data.notificationState;
