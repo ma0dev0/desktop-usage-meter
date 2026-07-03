@@ -1,0 +1,2 @@
+usageMeter.apiUrl=https://usage-meter-api.example.workers.dev/usage
+usageMeter.apiKey=replace-with-the-same-key-as-worker
