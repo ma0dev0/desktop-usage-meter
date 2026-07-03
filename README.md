@@ -129,11 +129,10 @@ npm run dist:win     # electron-builder で NSIS インストーラを生成
 ```sh
 npm test
 npm run check
-npm run check:notch
-npm run notch:preview:all
-npm run notch:preview:check
-npm run notch:accessibility:check
+npm run notch:verify
 ```
+
+`notch:verify` は Swift ビルド、NotchMeter の全プレビュー生成、画像回帰チェック、アクセシビリティ要約チェックをまとめて実行します。個別に確認したい場合は `npm run check:notch`、`npm run notch:preview:all`、`npm run notch:preview:check`、`npm run notch:accessibility:check` を使えます。
 
 アイコン再生成:
 
