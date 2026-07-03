@@ -17,6 +17,8 @@ function test(name, fn) {
 test('既知の取得失敗コードを短い日本語へ変換する', () => {
   assert.equal(refreshErrorLabel('LOAD_FAILED'), '読み込み失敗');
   assert.equal(refreshErrorLabel({ error: 'LOAD_FAILED' }), '読み込み失敗');
+  assert.equal(refreshErrorLabel('PARSE_FAILED'), '解析失敗');
+  assert.equal(refreshErrorLabel('SCRAPE_FAILED'), '取得失敗');
 });
 
 test('未知の取得失敗コードは汎用表示へフォールバックする', () => {
