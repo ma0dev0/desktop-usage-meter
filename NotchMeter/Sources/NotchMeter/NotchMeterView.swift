@@ -815,8 +815,8 @@ final class NotchMeterView: NSView {
             return nil
         }
         let patterns = [
-            #"あと\s*(\d{1,2})\s*分"#,
-            #"(\d{1,2})\s*分後"#
+            #"あと\s*(?:(\d{1,2})\s*時間)?\s*(?:(\d{1,2})\s*分)?"#,
+            #"(?:(\d{1,2})\s*時間)?\s*(?:(\d{1,2})\s*分)?\s*後"#
         ]
 
         for pattern in patterns {
@@ -825,17 +825,29 @@ final class NotchMeterView: NSView {
             }
             let range = NSRange(label.startIndex..<label.endIndex, in: label)
             guard let match = regex.firstMatch(in: label, range: range),
-                  match.numberOfRanges > 1,
-                  let minuteRange = Range(match.range(at: 1), in: label),
-                  let minutes = Int(label[minuteRange]),
-                  minutes > 0,
-                  minutes < 60 else {
+                  match.numberOfRanges > 2 else {
                 continue
             }
-            return minutes
+
+            let hours = intCapture(in: label, match: match, at: 1) ?? 0
+            let minutes = intCapture(in: label, match: match, at: 2) ?? 0
+            let totalMinutes = hours * 60 + minutes
+            guard totalMinutes > 0, totalMinutes < 60 else {
+                continue
+            }
+            return totalMinutes
         }
 
         return nil
+    }
+
+    private func intCapture(in label: String, match: NSTextCheckingResult, at index: Int) -> Int? {
+        guard index < match.numberOfRanges,
+              match.range(at: index).location != NSNotFound,
+              let range = Range(match.range(at: index), in: label) else {
+            return nil
+        }
+        return Int(label[range])
     }
 
     private func resetTimerWidth(for text: String) -> CGFloat {
