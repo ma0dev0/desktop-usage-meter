@@ -22,13 +22,19 @@ private data class ComplicationMetric(
 
 enum class MetricKind {
     CODEX_FIVE_HOUR,
+    CODEX_WEEKLY,
     CLAUDE_SESSION,
+    CLAUDE_WEEKLY,
     CRITICAL
 }
 
 class CodexFiveHourComplicationService : UsageComplicationService(MetricKind.CODEX_FIVE_HOUR)
 
+class CodexWeeklyComplicationService : UsageComplicationService(MetricKind.CODEX_WEEKLY)
+
 class ClaudeSessionComplicationService : UsageComplicationService(MetricKind.CLAUDE_SESSION)
+
+class ClaudeWeeklyComplicationService : UsageComplicationService(MetricKind.CLAUDE_WEEKLY)
 
 class CriticalUsageComplicationService : UsageComplicationService(MetricKind.CRITICAL)
 
@@ -59,11 +65,23 @@ abstract class UsageComplicationService(
                 description = "Codex 5時間 使用率 42%",
                 percent = 42
             )
+            MetricKind.CODEX_WEEKLY -> ComplicationMetric(
+                title = "Codex W",
+                text = "25%",
+                description = "Codex 週間 使用率 25%",
+                percent = 25
+            )
             MetricKind.CLAUDE_SESSION -> ComplicationMetric(
                 title = "Claude",
                 text = "68%",
                 description = "Claude セッション 使用率 68%",
                 percent = 68
+            )
+            MetricKind.CLAUDE_WEEKLY -> ComplicationMetric(
+                title = "Claude W",
+                text = "31%",
+                description = "Claude 週間 使用率 31%",
+                percent = 31
             )
             MetricKind.CRITICAL -> ComplicationMetric(
                 title = "Usage",
@@ -91,10 +109,20 @@ abstract class UsageComplicationService(
                 label = "5h",
                 percent = payload.codex.sessionPercent
             )
+            MetricKind.CODEX_WEEKLY -> singleMetric(
+                title = "Codex W",
+                label = "weekly",
+                percent = payload.codex.weeklyPercent
+            )
             MetricKind.CLAUDE_SESSION -> singleMetric(
                 title = "Claude",
                 label = "session",
                 percent = payload.claude.sessionPercent
+            )
+            MetricKind.CLAUDE_WEEKLY -> singleMetric(
+                title = "Claude W",
+                label = "weekly",
+                percent = payload.claude.weeklyPercent
             )
             MetricKind.CRITICAL -> criticalMetric(payload)
         }

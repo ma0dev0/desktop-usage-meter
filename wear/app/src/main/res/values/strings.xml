@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">Usage Meter</string>
     <string name="complication_codex_five_hour">Usage Meter: Codex 5h</string>
+    <string name="complication_codex_weekly">Usage Meter: Codex Weekly</string>
     <string name="complication_claude_session">Usage Meter: Claude</string>
+    <string name="complication_claude_weekly">Usage Meter: Claude Weekly</string>
     <string name="complication_critical">Usage Meter: Critical</string>
 </resources>
