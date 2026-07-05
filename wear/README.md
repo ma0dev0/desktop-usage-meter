@@ -27,14 +27,16 @@ usageMeter.apiKey=replace-with-the-same-key-as-worker
 ウォッチフェイスのユーティリティ枠から、次のデータソースを選べます。
 
 - `Usage Meter: Codex 5h`
+- `Usage Meter: Codex Weekly`
 - `Usage Meter: Claude`
+- `Usage Meter: Claude Weekly`
 - `Usage Meter: Critical`
 
 ゲージ対応枠では `RANGED_VALUE` として使用率バーを表示し、非対応枠では短い `%` 表示になります。タップするとUsage Meterアプリを開きます。更新間隔はWear OSの制約に合わせて5分です。
 
 ## 実機確認
 
-Pixel Watch 2をAndroid Studioに接続し、`app`構成を実行します。バックグラウンド更新、通知、タイル、コンプリケーションはMVP対象外です。
+Pixel Watch 2をAndroid Studioに接続し、`app`構成を実行します。バックグラウンド更新、通知、タイルはMVP対象外です。
 
 CLIで確認する場合:
 
